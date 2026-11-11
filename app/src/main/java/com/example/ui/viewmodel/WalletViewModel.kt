@@ -60,6 +60,14 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
     init {
         viewModelScope.launch {
             repository.processDueRecurringTransactions()
+            val settingsPrefs = application.getSharedPreferences("balatec_settings_prefs", Context.MODE_PRIVATE)
+            if (!settingsPrefs.getBoolean("transactions_cleaned_v4", false)) {
+                repository.clearAllTransactions()
+                settingsPrefs.edit().putBoolean("transactions_cleaned_v4", true).apply()
+            }
+            if (cloudSyncManager.syncState.value.isAuthenticated) {
+                cloudSyncManager.performSync(repository)
+            }
         }
     }
 
