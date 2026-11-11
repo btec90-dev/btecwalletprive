@@ -1,0 +1,77 @@
+{
+  "entities": {
+    "Account": {
+      "title": "Account",
+      "description": "User financial account (Cash, Bank, Taptap Send, MoneyGram, etc.)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique account ID" },
+        "name": { "type": "string", "description": "Account name" },
+        "type": { "type": "string", "description": "Account type e.g. CASH, BANK, MOBILE_MONEY" },
+        "balance": { "type": "number", "description": "Current balance" },
+        "currencyCode": { "type": "string", "description": "Currency code e.g. CFA, USD" },
+        "emojiAvatar": { "type": "string", "description": "Icon or emoji representation" },
+        "isDefault": { "type": "boolean", "description": "Whether this is default account" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+      },
+      "required": ["id", "name", "balance", "currencyCode"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Financial ledger entry",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique transaction ID" },
+        "amount": { "type": "number", "description": "Transaction amount" },
+        "currencyCode": { "type": "string", "description": "Currency code e.g. CFA, USD" },
+        "type": { "type": "string", "description": "EXPENSE, INCOME, or TRANSFER" },
+        "category": { "type": "string", "description": "Transaction category" },
+        "accountId": { "type": "string", "description": "Associated account ID" },
+        "note": { "type": "string", "description": "Memo or note" },
+        "payee": { "type": "string", "description": "Payee or recipient name" },
+        "timestamp": { "type": "number", "description": "Epoch timestamp in ms" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+      },
+      "required": ["id", "amount", "currencyCode", "type", "category", "accountId", "timestamp"]
+    },
+    "RecurringTransaction": {
+      "title": "RecurringTransaction",
+      "description": "Scheduled recurring ledger transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique recurring ID" },
+        "title": { "type": "string", "description": "Title/description" },
+        "amount": { "type": "number", "description": "Recurring amount" },
+        "currencyCode": { "type": "string", "description": "Currency code e.g. CFA, USD" },
+        "type": { "type": "string", "description": "EXPENSE or INCOME" },
+        "category": { "type": "string", "description": "Category" },
+        "accountId": { "type": "string", "description": "Associated account ID" },
+        "payee": { "type": "string", "description": "Payee name" },
+        "frequency": { "type": "string", "description": "DAILY, WEEKLY, MONTHLY, or YEARLY" },
+        "startDate": { "type": "number", "description": "Start timestamp ms" },
+        "nextExecutionDate": { "type": "number", "description": "Next execution timestamp ms" },
+        "isActive": { "type": "boolean", "description": "Whether schedule is active" },
+        "lastExecutedDate": { "type": "number", "description": "Last execution timestamp ms" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+      },
+      "required": ["id", "title", "amount", "currencyCode", "type", "category", "accountId", "frequency", "nextExecutionDate"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "User financial accounts"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "User ledger transactions"
+    },
+    "/users/{userId}/recurring/{recurringId}": {
+      "schema": "RecurringTransaction",
+      "description": "User scheduled recurring transactions"
+    }
+  }
+}

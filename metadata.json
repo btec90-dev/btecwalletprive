@@ -1,0 +1,6 @@
+{
+  "name": "Balatec Secure Wallet",
+  "description": "Artisan offline-first secure financial wallet with leather aesthetics, smart multi-accounts, multi-currency, interactive analytics, and cloud sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

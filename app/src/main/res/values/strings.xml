@@ -1,0 +1,190 @@
+<resources>
+    <string name="app_name">Balatec Secure Wallet</string>
+
+    <!-- Navigation -->
+    <string name="nav_accounts">Comptes</string>
+    <string name="nav_ledger">Grand Livre</string>
+    <string name="nav_categories">Catégories</string>
+    <string name="nav_analytics">Analytique</string>
+    <string name="nav_settings">Paramètres</string>
+
+    <!-- Overview & Balances -->
+    <string name="total_balance">Solde Total</string>
+    <string name="net_worth">Valeur Nette</string>
+    <string name="income">Revenus</string>
+    <string name="expenses">Dépenses</string>
+    <string name="cash_flow">Flux de Trésorerie</string>
+    <string name="recent_activity">Activité Récente</string>
+    <string name="view_all">Tout Afficher</string>
+    <string name="all_accounts">Tous les comptes</string>
+
+    <!-- Account Management -->
+    <string name="smart_accounts">Comptes Intelligents</string>
+    <string name="add_account">Ajouter un Compte</string>
+    <string name="edit_account">Modifier le Compte</string>
+    <string name="delete_account">Supprimer le Compte</string>
+    <string name="account_name">Nom du Compte</string>
+    <string name="account_type">Type de Compte</string>
+    <string name="initial_balance">Solde Actuel</string>
+    <string name="account_avatar">Icône du Compte</string>
+    <string name="account_currency">Devise</string>
+    <string name="type_cash">Espèces</string>
+    <string name="type_card">Carte Crédit / Débit</string>
+    <string name="type_savings">Épargne</string>
+    <string name="type_custom">Compte Personnalisé</string>
+    <string name="account_order_info">Trié avec Espèces en premier, puis Cartes, Épargne et Personnalisé</string>
+    <string name="confirm_delete_account">Êtes-vous sûr de vouloir supprimer ce compte et ses transactions associées ?</string>
+
+    <!-- Transaction Ledger -->
+    <string name="transactions">Transactions</string>
+    <string name="add_transaction">Ajouter une Transaction</string>
+    <string name="edit_transaction">Modifier la Transaction</string>
+    <string name="delete_transaction">Supprimer la Transaction</string>
+    <string name="transaction_type">Type</string>
+    <string name="payee_merchant">Bénéficiaire / Marchand</string>
+    <string name="category">Catégorie</string>
+    <string name="amount">Montant</string>
+    <string name="select_account">Sélectionner un Compte</string>
+    <string name="date_and_time">Date &amp; Heure</string>
+    <string name="notes_memo">Notes / Mémo</string>
+    <string name="search_hint">Rechercher bénéficiaire, notes...</string>
+    <string name="filter">Filtrer</string>
+    <string name="filter_all">Tous</string>
+    <string name="filter_income">Revenus</string>
+    <string name="filter_expense">Dépenses</string>
+    <string name="filter_category">Catégorie</string>
+    <string name="amount_range">Fourchette de Montant</string>
+    <string name="min_amount">Montant Min</string>
+    <string name="max_amount">Montant Max</string>
+    <string name="clear_filters">Effacer les Filtres</string>
+    <string name="filter_this_month">Ce mois-ci</string>
+    <string name="filter_last_month">Mois dernier</string>
+    <string name="filter_all_time">Tout</string>
+    <string name="select_all">Tout sélectionner</string>
+    <string name="deselect_all">Tout désélectionner</string>
+    <string name="selected_items">sélectionnés</string>
+    <string name="delete_selected">Supprimer la sélection</string>
+    <string name="export_selected_pdf">Exporter en PDF</string>
+    <string name="export_pdf">Exporter en PDF</string>
+    <string name="frequent_contacts">Contacts Fréquents</string>
+    <string name="quick_transfer">Transfert Rapide</string>
+    <string name="recurring_transactions">Récurrentes</string>
+    <string name="recurring_schedule">Échéancier &amp; Récurrences</string>
+    <string name="add_recurring">Programmer une Récurrence</string>
+    <string name="make_recurring">Répéter cette transaction automatiquement</string>
+    <string name="frequency">Fréquence</string>
+    <string name="next_due_date">Prochaine échéance</string>
+    <string name="execute_now">Ajouter au Grand Livre maintenant</string>
+    <string name="auto_added_to_ledger">Ajouté automatiquement au grand livre</string>
+    <string name="active">Actif</string>
+    <string name="paused">En pause</string>
+    <string name="due_now">Échue</string>
+    <string name="no_recurring">Aucune transaction récurrente programmée</string>
+    <string name="no_recurring_sub">Programmez loyers, salaires ou abonnements pour qu\'ils soient ajoutés automatiquement au grand livre.</string>
+    <string name="no_transactions">Aucune transaction trouvée</string>
+    <string name="no_transactions_sub">Appuyez sur + pour enregistrer votre première transaction</string>
+    <string name="confirm_delete_tx">Supprimer cet enregistrement de transaction ?</string>
+
+    <!-- Categories -->
+    <string name="cat_food">Alimentation &amp; Restaurants</string>
+    <string name="cat_shopping">Achats &amp; Boutiques</string>
+    <string name="cat_housing">Logement &amp; Loyer</string>
+    <string name="cat_transport">Transports</string>
+    <string name="cat_salary">Salaire &amp; Revenus</string>
+    <string name="cat_investments">Investissements</string>
+    <string name="cat_entertainment">Divertissement</string>
+    <string name="cat_health">Santé &amp; Médical</string>
+    <string name="cat_utilities">Factures &amp; Services</string>
+    <string name="cat_education">Éducation</string>
+    <string name="cat_travel">Voyages</string>
+    <string name="cat_personal">Soins Personnels</string>
+    <string name="cat_gifts">Dons &amp; Cadeaux</string>
+    <string name="cat_other">Autre</string>
+
+    <!-- Security & PIN -->
+    <string name="security_pin">Code PIN de Sécurité</string>
+    <string name="enter_pin">Entrez le code PIN (4 chiffres)</string>
+    <string name="enter_pin_sub">Déverrouiller Balatec Secure Wallet</string>
+    <string name="create_pin">Créer un code PIN</string>
+    <string name="confirm_pin">Confirmer le code PIN</string>
+    <string name="pin_incorrect">Code PIN incorrect. Réessayez.</string>
+    <string name="pin_mismatch">Les codes PIN ne correspondent pas.</string>
+    <string name="pin_lock_enabled">Verrouillage par code PIN</string>
+    <string name="biometric_auth">Biométrie / Empreinte digitale</string>
+    <string name="use_biometrics">Utiliser la biométrie pour déverrouiller</string>
+    <string name="biometric_prompt_title">Déverrouiller Balatec Wallet</string>
+    <string name="biometric_prompt_sub">Confirmez votre empreinte digitale ou biométrie</string>
+    <string name="change_pin">Modifier le code PIN</string>
+
+    <!-- Cloud Sync & Multi-Device -->
+    <string name="cloud_backup_sync">Sauvegarde Cloud &amp; Synchronisation</string>
+    <string name="sync_desc">Synchronisation déterministe avec sécurité de niveau bancaire</string>
+    <string name="sync_status_local">Local Uniquement (Hors-ligne)</string>
+    <string name="sync_status_synced">Synchronisé sur le Cloud</string>
+    <string name="sync_status_syncing">Synchronisation en cours...</string>
+    <string name="last_synced">Dernière synchronisation</string>
+    <string name="auth_gate_title">Authentification requise</string>
+    <string name="auth_gate_desc">La sauvegarde dans le cloud et la synchronisation multi-appareils nécessitent un compte authentifié. Les utilisateurs non inscrits peuvent utiliser le portefeuille localement.</string>
+    <string name="sign_in_google">Continuer avec Google</string>
+    <string name="or_divider">OU</string>
+    <string name="email_address">Adresse E-mail</string>
+    <string name="password">Mot de passe</string>
+    <string name="sign_in">Se Connecter</string>
+    <string name="register">Créer un Compte</string>
+    <string name="switch_to_register">Nouvel utilisateur ? Inscrivez-vous</string>
+    <string name="switch_to_signin">Déjà un compte ? Se connecter</string>
+    <string name="signed_in_as">Connecté en tant que</string>
+    <string name="sync_now">Synchroniser Maintenant</string>
+    <string name="disconnect_account">Déconnecter la synchronisation</string>
+    <string name="deterministic_notice">Résolution de conflit déterministe active (dernier écrit l\'emporte en UTC).</string>
+
+    <!-- UI Themes -->
+    <string name="theme_selection">Thème Cuir Artisanal</string>
+    <string name="theme_classic_group">Collection Cuir Classique</string>
+    <string name="theme_bold_group">Collection Artisanale Audacieuse</string>
+    <string name="theme_brown_leather">Cuir Brun</string>
+    <string name="theme_caramel">Caramel</string>
+    <string name="theme_obsidian">Obsidienne</string>
+    <string name="theme_rosewood">Bois de Rose</string>
+    <string name="theme_white_leather">Cuir Blanc</string>
+    <string name="theme_forest_green">Vert Forêt</string>
+    <string name="theme_deep_blue">Bleu Profond</string>
+    <string name="theme_burgundy">Bourgogne</string>
+    <string name="theme_sahara_gold">Or du Sahara</string>
+
+    <!-- Currencies -->
+    <string name="base_currency">Devise Principale</string>
+    <string name="currency_settings">Devises &amp; Formatage</string>
+
+    <!-- Analytics & Charts -->
+    <string name="spending_breakdown">Dépenses par Catégorie</string>
+    <string name="monthly_trends">Tendances Mensuelles Revenus vs Dépenses</string>
+    <string name="highest_expense">Plus Grande Catégorie de Dépense</string>
+    <string name="savings_rate">Taux d\'Épargne</string>
+    <string name="no_chart_data">Aucune donnée financière disponible pour les graphiques pour l\'instant.</string>
+
+    <!-- Export & Import -->
+    <string name="export_import">Sauvegarde &amp; Transfert de Données</string>
+    <string name="export_json">Exporter Sauvegarde JSON Chiffrée</string>
+    <string name="export_csv">Exporter le Grand Livre (CSV)</string>
+    <string name="import_json">Importer des Données depuis une Sauvegarde</string>
+    <string name="export_success">Exportation copiée et générée avec succès</string>
+    <string name="import_success">Données importées avec succès</string>
+    <string name="paste_json_hint">Collez le contenu JSON exporté ici...</string>
+    <string name="import_confirm">Confirmer l\'Importation</string>
+    <string name="copy">Copier</string>
+    <string name="share">Partager</string>
+
+    <!-- Language -->
+    <string name="language">Langue</string>
+    <string name="lang_en">English</string>
+    <string name="lang_fr">Français</string>
+
+    <!-- General Actions -->
+    <string name="save">Enregistrer</string>
+    <string name="cancel">Annuler</string>
+    <string name="delete">Supprimer</string>
+    <string name="close">Fermer</string>
+    <string name="done">Terminé</string>
+    <string name="optional">Optionnel</string>
+</resources>
