@@ -27,11 +27,37 @@ interface WalletDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAccount(account: AccountEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSeedAccount(account: AccountEntity)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSeedAccounts(accounts: List<AccountEntity>)
+
     @Update
     suspend fun updateAccount(account: AccountEntity)
 
     @Query("UPDATE accounts SET isDeleted = 1, updatedAt = :timestamp WHERE id = :id")
     suspend fun markAccountDeleted(id: String, timestamp: Long = System.currentTimeMillis())
+
+    @Query("SELECT * FROM accounts WHERE isDeleted = 1")
+    suspend fun getDeletedAccountsList(): List<AccountEntity>
+
+    @Query("DELETE FROM accounts WHERE id = :id")
+    suspend fun hardDeleteAccount(id: String)
+
+    @Query("UPDATE transactions SET accountId = :toAccountId, updatedAt = :timestamp WHERE accountId = :fromAccountId")
+    suspend fun reassignTransactionsAccount(
+        fromAccountId: String,
+        toAccountId: String,
+        timestamp: Long = System.currentTimeMillis()
+    )
+
+    @Query("UPDATE recurring_transactions SET accountId = :toAccountId, updatedAt = :timestamp WHERE accountId = :fromAccountId")
+    suspend fun reassignRecurringAccount(
+        fromAccountId: String,
+        toAccountId: String,
+        timestamp: Long = System.currentTimeMillis()
+    )
 
     @Upsert
     suspend fun upsertAccounts(accounts: List<AccountEntity>)

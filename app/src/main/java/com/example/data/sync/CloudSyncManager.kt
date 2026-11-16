@@ -33,6 +33,8 @@ import com.google.firebase.auth.auth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.ListenerRegistration
+import com.google.firebase.firestore.SetOptions
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
@@ -249,42 +251,56 @@ class CloudSyncManager(
 
     fun startRealtimeSync(repository: WalletRepository, scope: CoroutineScope) {
         stopRealtimeSync()
+        if (!_syncState.value.isSyncEnabled) return
         val user = auth.currentUser ?: return
         val email = user.email?.trim()?.lowercase() ?: return
         if (!accessControl.isEmailAuthorized(email)) return
 
         val sharedRoot = firestore.collection("shared_wallets").document(SHARED_WALLET_ID)
+        val newRegistrations = mutableListOf<ListenerRegistration>()
 
-        listenerRegistrations += sharedRoot.collection("accounts").addSnapshotListener { snap, err ->
+        newRegistrations += sharedRoot.collection("accounts").addSnapshotListener { snap, err ->
             if (err != null) {
                 handleFirestoreError(err, OperationType.LIST, "shared_wallets/$SHARED_WALLET_ID/accounts")
                 return@addSnapshotListener
             }
             val docs = snap?.documents ?: return@addSnapshotListener
             scope.launch(Dispatchers.IO) {
-                val remoteAccounts = docs.mapNotNull { docToAccount(it.id, it.data) }
-                    .filter { !TwtAccountHelper.isTwtAccount(it) }
-                if (remoteAccounts.isNotEmpty()) {
-                    repository.mergeRemoteData(remoteAccounts, emptyList())
+                try {
+                    val remoteAccounts = docs.mapNotNull { docToAccount(it.id, it.data) }
+                        .filter { !TwtAccountHelper.isTwtAccount(it) }
+                    if (remoteAccounts.isNotEmpty()) {
+                        repository.mergeRemoteData(remoteAccounts, emptyList())
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("CloudSync", "Shared accounts snapshot merge error: ${e.message}")
                 }
             }
         }
 
-        listenerRegistrations += sharedRoot.collection("transactions").addSnapshotListener { snap, err ->
+        newRegistrations += sharedRoot.collection("transactions").addSnapshotListener { snap, err ->
             if (err != null) {
                 handleFirestoreError(err, OperationType.LIST, "shared_wallets/$SHARED_WALLET_ID/transactions")
                 return@addSnapshotListener
             }
             val docs = snap?.documents ?: return@addSnapshotListener
             scope.launch(Dispatchers.IO) {
-                val remoteTxs = docs.mapNotNull { docToTransaction(it.id, it.data) }
-                if (remoteTxs.isNotEmpty()) {
-                    repository.mergeRemoteData(emptyList(), remoteTxs)
+                try {
+                    val remoteTxs = docs.mapNotNull { docToTransaction(it.id, it.data) }
+                    if (remoteTxs.isNotEmpty()) {
+                        repository.mergeRemoteData(emptyList(), remoteTxs)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w("CloudSync", "Shared tx snapshot merge error: ${e.message}")
                 }
             }
         }
 
-        listenerRegistrations += sharedRoot.collection("categories").addSnapshotListener { snap, err ->
+        newRegistrations += sharedRoot.collection("categories").addSnapshotListener { snap, err ->
             if (err != null) {
                 handleFirestoreError(err, OperationType.LIST, "shared_wallets/$SHARED_WALLET_ID/categories")
                 return@addSnapshotListener
@@ -301,39 +317,61 @@ class CloudSyncManager(
         // Strict TWT Isolation: ONLY Primary Admin gets realtime TWT listeners
         if (email == AccessControlManager.ADMIN_EMAIL) {
             val twtRoot = firestore.collection("private_twt").document(ADMIN_TWT_DOC)
-            listenerRegistrations += twtRoot.collection("accounts").addSnapshotListener { snap, err ->
+            newRegistrations += twtRoot.collection("accounts").addSnapshotListener { snap, err ->
                 if (err != null) {
                     handleFirestoreError(err, OperationType.LIST, "private_twt/$ADMIN_TWT_DOC/accounts")
                     return@addSnapshotListener
                 }
                 val docs = snap?.documents ?: return@addSnapshotListener
                 scope.launch(Dispatchers.IO) {
-                    val twtAccounts = docs.mapNotNull { docToAccount(it.id, it.data) }
-                        .map { TwtAccountHelper.normalizeTwtAccount(it) }
-                    if (twtAccounts.isNotEmpty()) {
-                        repository.mergeRemoteData(twtAccounts, emptyList())
+                    try {
+                        val twtAccounts = docs.mapNotNull { docToAccount(it.id, it.data) }
+                            .map { TwtAccountHelper.normalizeTwtAccount(it) }
+                        if (twtAccounts.isNotEmpty()) {
+                            repository.mergeRemoteData(twtAccounts, emptyList())
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w("CloudSync", "Private TWT accounts merge error: ${e.message}")
                     }
                 }
             }
-            listenerRegistrations += twtRoot.collection("transactions").addSnapshotListener { snap, err ->
+            newRegistrations += twtRoot.collection("transactions").addSnapshotListener { snap, err ->
                 if (err != null) {
                     handleFirestoreError(err, OperationType.LIST, "private_twt/$ADMIN_TWT_DOC/transactions")
                     return@addSnapshotListener
                 }
                 val docs = snap?.documents ?: return@addSnapshotListener
                 scope.launch(Dispatchers.IO) {
-                    val twtTxs = docs.mapNotNull { docToTransaction(it.id, it.data) }
-                    if (twtTxs.isNotEmpty()) {
-                        repository.mergeRemoteData(emptyList(), twtTxs)
+                    try {
+                        val twtTxs = docs.mapNotNull { docToTransaction(it.id, it.data) }
+                        if (twtTxs.isNotEmpty()) {
+                            repository.mergeRemoteData(emptyList(), twtTxs)
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Log.w("CloudSync", "Private TWT tx merge error: ${e.message}")
                     }
                 }
             }
         }
+
+        synchronized(listenerRegistrations) {
+            listenerRegistrations.addAll(newRegistrations)
+        }
     }
 
     fun stopRealtimeSync() {
-        listenerRegistrations.forEach { it.remove() }
-        listenerRegistrations.clear()
+        synchronized(listenerRegistrations) {
+            listenerRegistrations.forEach {
+                try {
+                    it.remove()
+                } catch (_: Exception) { }
+            }
+            listenerRegistrations.clear()
+        }
     }
 
     suspend fun deleteTransactionRemote(id: String, isTwtTransaction: Boolean = false) {
@@ -414,19 +452,25 @@ class CloudSyncManager(
         prefs.edit().putBoolean("is_sync_enabled", false).apply()
         _syncState.value = _syncState.value.copy(
             isSyncEnabled = false,
-            status = SyncStatus.LOCAL_ONLY
+            status = SyncStatus.LOCAL_ONLY,
+            statusMessage = "Mode hors-ligne local actif"
         )
     }
 
     fun enableSync() {
         prefs.edit().putBoolean("is_sync_enabled", true).apply()
-        _syncState.value = _syncState.value.copy(isSyncEnabled = true)
+        val authed = auth.currentUser != null && accessControl.isEmailAuthorized(auth.currentUser?.email)
+        _syncState.value = _syncState.value.copy(
+            isSyncEnabled = true,
+            status = if (authed) SyncStatus.SYNCED else SyncStatus.LOCAL_ONLY
+        )
     }
 
     suspend fun performSync(repository: WalletRepository): String {
         val user = auth.currentUser
         val email = user?.email?.trim()?.lowercase()
         if (user == null || email == null || !accessControl.isEmailAuthorized(email) || !_syncState.value.isSyncEnabled) {
+            _syncState.value = _syncState.value.copy(status = SyncStatus.LOCAL_ONLY)
             return "Mode hors-ligne actif (base locale sécurisée)."
         }
 
@@ -441,19 +485,33 @@ class CloudSyncManager(
                 val sharedRecCol = sharedRoot.collection("recurring")
                 val sharedCatCol = sharedRoot.collection("categories")
 
+                // 0. Clean up locally deleted/deduplicated accounts remotely so duplicates never resurrect
+                val deletedLocalAccounts = repository.getDeletedAccountsList()
+                for (delAcc in deletedLocalAccounts) {
+                    val isTwt = TwtAccountHelper.isTwtAccount(delAcc)
+                    if (!isTwt) {
+                        sharedAccountsCol.document(delAcc.id).delete().await()
+                        repository.hardDeleteAccount(delAcc.id)
+                    } else if (isPrimaryAdmin) {
+                        firestore.collection("private_twt").document(ADMIN_TWT_DOC)
+                            .collection("accounts").document(delAcc.id).delete().await()
+                        repository.hardDeleteAccount(delAcc.id)
+                    }
+                }
+
                 val localAccounts = repository.getAccountsList()
                 val localTwtAccounts = localAccounts.filter { TwtAccountHelper.isTwtAccount(it) }
                 val twtAccountIds = localTwtAccounts.map { it.id }.toSet()
                 val localSharedAccounts = localAccounts.filter { it.id !in twtAccountIds }
 
-                // 1A. Sync Shared Non-TWT Accounts
+                // 1A. Sync Shared Non-TWT Accounts (SetOptions.merge() with deterministic IDs)
                 val remoteSharedAccSnap = sharedAccountsCol.get().await()
                 val remoteSharedAccs = remoteSharedAccSnap.documents.mapNotNull { docToAccount(it.id, it.data) }
                     .filter { !TwtAccountHelper.isTwtAccount(it) }
 
                 for (acc in localSharedAccounts) {
                     val map = accountToMap(acc, user.uid, isTwt = false)
-                    sharedAccountsCol.document(acc.id).set(map).await()
+                    sharedAccountsCol.document(acc.id).set(map, SetOptions.merge()).await()
                 }
 
                 // 1B. Sync Private TWT Accounts (Primary Admin ONLY)
@@ -468,7 +526,7 @@ class CloudSyncManager(
                     for (acc in localTwtAccounts) {
                         val normalized = TwtAccountHelper.normalizeTwtAccount(acc)
                         val map = accountToMap(normalized, user.uid, isTwt = true)
-                        twtAccountsCol.document(normalized.id).set(map).await()
+                        twtAccountsCol.document(normalized.id).set(map, SetOptions.merge()).await()
                     }
                 }
 
@@ -498,11 +556,14 @@ class CloudSyncManager(
                     val isTwt = TwtAccountHelper.isTwtAccount(acc)
                     if (!isTwt) {
                         val cur = Currencies.effectiveCurrencyCode(acc, "CFA")
-                        sharedTxCol.document(tx.id).set(transactionToMap(tx, cur, user.uid, isTwt = false)).await()
+                        sharedTxCol.document(tx.id)
+                            .set(transactionToMap(tx, cur, user.uid, isTwt = false), SetOptions.merge())
+                            .await()
                     } else if (isPrimaryAdmin) {
                         firestore.collection("private_twt").document(ADMIN_TWT_DOC)
                             .collection("transactions").document(tx.id)
-                            .set(transactionToMap(tx, "USD", user.uid, isTwt = true)).await()
+                            .set(transactionToMap(tx, "USD", user.uid, isTwt = true), SetOptions.merge())
+                            .await()
                     }
                 }
 
@@ -535,7 +596,7 @@ class CloudSyncManager(
                         "updatedBy" to user.uid,
                         "updatedAt" to FieldValue.serverTimestamp()
                     ).filterValues { it != null }
-                    sharedCatCol.document(docId).set(catMap).await()
+                    sharedCatCol.document(docId).set(catMap, SetOptions.merge()).await()
                 }
                 repository.mergeRemoteCategories(remoteCats)
 
@@ -552,7 +613,7 @@ class CloudSyncManager(
                     } else {
                         sharedRecCol
                     }
-                    targetCol.document(rec.id).set(recurringToMap(rec, cur, user.uid)).await()
+                    targetCol.document(rec.id).set(recurringToMap(rec, cur, user.uid), SetOptions.merge()).await()
                 }
                 for (doc in remoteRecSnap.documents) {
                     if (localRecList.none { it.id == doc.id }) {
@@ -570,13 +631,15 @@ class CloudSyncManager(
                 )
                 "Synchronisation Firestore terminée."
             }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             handleFirestoreError(e, OperationType.WRITE, "shared_wallets/$SHARED_WALLET_ID")
             _syncState.value = _syncState.value.copy(
-                status = SyncStatus.ERROR,
-                statusMessage = "Erreur de synchronisation: ${e.localizedMessage}"
+                status = if (_syncState.value.isSyncEnabled) SyncStatus.ERROR else SyncStatus.LOCAL_ONLY,
+                statusMessage = "Erreur de synchronisation: ${e.localizedMessage ?: "Inconnue"}"
             )
-            "Erreur lors de la synchronisation: ${e.localizedMessage}"
+            "Erreur lors de la synchronisation: ${e.localizedMessage ?: "Inconnue"}"
         }
     }
 

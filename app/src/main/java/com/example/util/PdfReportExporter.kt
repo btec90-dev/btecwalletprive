@@ -14,6 +14,7 @@ import com.example.data.model.TransactionType
 import com.example.data.model.TwtAccountHelper
 import java.io.File
 import java.io.FileOutputStream
+import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -28,41 +29,41 @@ object PdfReportExporter {
         periodLabel: String = "Toutes les dates",
         filterSummary: String? = null
     ): File? {
-        if (transactions.isEmpty()) return null
+        var doc: PdfDocument? = null
+        return try {
+            doc = PdfDocument()
+            val pageWidth = 595 // A4 width (72 dpi)
+            val pageHeight = 842 // A4 height
 
-        val doc = PdfDocument()
-        val pageWidth = 595 // A4 width (72 dpi)
-        val pageHeight = 842 // A4 height
+            val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRENCH)
+            val shortDateFormat = SimpleDateFormat("dd/MM/yy", Locale.FRENCH)
 
-        val dateFormat = SimpleDateFormat("dd/MM/yyyy HH:mm", Locale.FRENCH)
-        val shortDateFormat = SimpleDateFormat("dd/MM/yy", Locale.FRENCH)
+            val usdTxs = transactions.filter {
+                val acc = accountMap[it.accountId]
+                Currencies.effectiveCurrencyCode(acc, "CFA") == "USD"
+            }
+            val cfaTxs = transactions.filter {
+                val acc = accountMap[it.accountId]
+                Currencies.effectiveCurrencyCode(acc, "CFA") == "CFA"
+            }
 
-        val usdTxs = transactions.filter {
-            val acc = accountMap[it.accountId]
-            Currencies.effectiveCurrencyCode(acc, "CFA") == "USD"
-        }
-        val cfaTxs = transactions.filter {
-            val acc = accountMap[it.accountId]
-            Currencies.effectiveCurrencyCode(acc, "CFA") == "CFA"
-        }
+            val cfaIncome: BigDecimal = Currencies.sumAmounts(cfaTxs.filter { it.type == TransactionType.INCOME }.map { it.amount })
+            val cfaExpense: BigDecimal = Currencies.sumAmounts(cfaTxs.filter { it.type == TransactionType.EXPENSE }.map { it.amount })
+            val cfaNet: BigDecimal = cfaIncome.subtract(cfaExpense)
 
-        val cfaIncome = cfaTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
-        val cfaExpense = cfaTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
-        val cfaNet = cfaIncome - cfaExpense
+            val usdIncome: BigDecimal = Currencies.sumAmounts(usdTxs.filter { it.type == TransactionType.INCOME }.map { it.amount })
+            val usdExpense: BigDecimal = Currencies.sumAmounts(usdTxs.filter { it.type == TransactionType.EXPENSE }.map { it.amount })
+            val usdNet: BigDecimal = usdIncome.subtract(usdExpense)
 
-        val usdIncome = usdTxs.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
-        val usdExpense = usdTxs.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
-        val usdNet = usdIncome - usdExpense
+            val itemsPerPage = 21
+            val totalPages = if (transactions.isEmpty()) 1 else ((transactions.size - 1) / itemsPerPage) + 1
 
-        val itemsPerPage = 21
-        val totalPages = ((transactions.size - 1) / itemsPerPage) + 1
+            val paint = Paint().apply { isAntiAlias = true }
 
-        val paint = Paint().apply { isAntiAlias = true }
-
-        for (pageIndex in 0 until totalPages) {
-            val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create()
-            val page = doc.startPage(pageInfo)
-            val canvas = page.canvas
+            for (pageIndex in 0 until totalPages) {
+                val pageInfo = PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create()
+                val page = doc.startPage(pageInfo)
+                val canvas = page.canvas
 
             // Header Banner (Espresso Leather Brown)
             paint.color = Color.parseColor("#4A2C2A")
@@ -106,8 +107,8 @@ object PdfReportExporter {
                 currentY += 32f
 
                 val hasUsd = usdTxs.isNotEmpty()
-                val hasCfa = cfaTxs.isNotEmpty()
-                val boxHeight = if (hasUsd && hasCfa) 66f else 44f
+                val hasCfa = cfaTxs.isNotEmpty() || !hasUsd
+                val boxHeight = if (hasUsd && cfaTxs.isNotEmpty()) 66f else 44f
 
                 paint.color = Color.parseColor("#F5F5F0")
                 paint.style = Paint.Style.FILL
@@ -130,8 +131,9 @@ object PdfReportExporter {
                     paint.color = Color.parseColor("#B71C1C")
                     canvas.drawText("Dépenses: -${Currencies.format(cfaExpense, "CFA")}", 225f, summaryRowY, paint)
 
-                    paint.color = if (cfaNet >= 0) Color.parseColor("#1B4D3E") else Color.parseColor("#B71C1C")
-                    val netSign = if (cfaNet >= 0) "+" else ""
+                    val cfaNetNonNeg = cfaNet.compareTo(BigDecimal.ZERO) >= 0
+                    paint.color = if (cfaNetNonNeg) Color.parseColor("#1B4D3E") else Color.parseColor("#B71C1C")
+                    val netSign = if (cfaNetNonNeg) "+" else ""
                     canvas.drawText("Net: $netSign${Currencies.format(cfaNet, "CFA")}", 395f, summaryRowY, paint)
 
                     summaryRowY += 24f
@@ -145,8 +147,9 @@ object PdfReportExporter {
                     paint.color = Color.parseColor("#B71C1C")
                     canvas.drawText("Dépenses: -${Currencies.format(usdExpense, "USD")}", 225f, summaryRowY, paint)
 
-                    paint.color = if (usdNet >= 0) Color.parseColor("#1B4D3E") else Color.parseColor("#B71C1C")
-                    val netSign = if (usdNet >= 0) "+" else ""
+                    val usdNetNonNeg = usdNet.compareTo(BigDecimal.ZERO) >= 0
+                    paint.color = if (usdNetNonNeg) Color.parseColor("#1B4D3E") else Color.parseColor("#B71C1C")
+                    val netSign = if (usdNetNonNeg) "+" else ""
                     canvas.drawText("Net: $netSign${Currencies.format(usdNet, "USD")}", 395f, summaryRowY, paint)
                 }
 
@@ -175,58 +178,75 @@ object PdfReportExporter {
 
             val startIndex = pageIndex * itemsPerPage
             val endIndex = minOf(startIndex + itemsPerPage, transactions.size)
-            val pageItems = transactions.subList(startIndex, endIndex)
+            val pageItems = if (transactions.isEmpty()) emptyList() else transactions.subList(startIndex, endIndex)
 
             paint.textSize = 8.5f
 
-            pageItems.forEachIndexed { rowIdx, tx ->
-                val rowY = currentY + (rowIdx * 24f)
-                val isEven = rowIdx % 2 == 0
-
-                paint.color = if (isEven) Color.parseColor("#FAF7F4") else Color.WHITE
+            if (pageItems.isEmpty()) {
+                paint.color = Color.parseColor("#FAF7F4")
                 paint.style = Paint.Style.FILL
-                canvas.drawRect(32f, rowY, (pageWidth - 32).toFloat(), rowY + 24f, paint)
-
-                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-                paint.color = Color.parseColor("#424242")
-                canvas.drawText(shortDateFormat.format(Date(tx.timestamp)), 40f, rowY + 16f, paint)
-
-                val payeeText = if (tx.payee.length > 23) tx.payee.take(21) + ".." else tx.payee
-                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                paint.color = Color.parseColor("#212121")
-                canvas.drawText(payeeText, 100f, rowY + 16f, paint)
-
-                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
-                paint.color = Color.parseColor("#5D4037")
-                val catText = if (tx.category.length > 17) tx.category.take(15) + ".." else tx.category
-                canvas.drawText(catText, 248f, rowY + 16f, paint)
-
-                val account = accountMap[tx.accountId]
-                val accName = if (TwtAccountHelper.isTwtAccount(account)) {
-                    TwtAccountHelper.currentTwtAccountName()
-                } else {
-                    account?.name ?: "Compte"
-                }
-                val accText = if (accName.length > 16) accName.take(14) + ".." else accName
-                paint.color = Color.parseColor("#616161")
-                canvas.drawText(accText, 358f, rowY + 16f, paint)
-
-                val isIncome = tx.type == TransactionType.INCOME
-                paint.color = if (isIncome) Color.parseColor("#1B4D3E") else Color.parseColor("#B71C1C")
-                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-                val effectiveCurrency = Currencies.effectiveCurrencyCode(account, "CFA")
-                val prefix = if (isIncome) "+" else "-"
-                val amountStr = "$prefix${Currencies.format(tx.amount, effectiveCurrency)}"
-
-                paint.textAlign = Paint.Align.RIGHT
-                canvas.drawText(amountStr, (pageWidth - 40).toFloat(), rowY + 16f, paint)
+                canvas.drawRect(32f, currentY, (pageWidth - 32).toFloat(), currentY + 34f, paint)
+                paint.color = Color.parseColor("#757575")
+                paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.ITALIC)
+                paint.textSize = 9.5f
+                paint.textAlign = Paint.Align.CENTER
+                canvas.drawText(
+                    "Aucune transaction enregistrée pour ce filtre (0 ligne).",
+                    (pageWidth / 2f),
+                    currentY + 21f,
+                    paint
+                )
                 paint.textAlign = Paint.Align.LEFT
+            } else {
+                pageItems.forEachIndexed { rowIdx, tx ->
+                    val rowY = currentY + (rowIdx * 24f)
+                    val isEven = rowIdx % 2 == 0
 
-                paint.color = Color.parseColor("#E0D6CD")
-                paint.style = Paint.Style.STROKE
-                paint.strokeWidth = 0.5f
-                canvas.drawLine(32f, rowY + 24f, (pageWidth - 32).toFloat(), rowY + 24f, paint)
-                paint.style = Paint.Style.FILL
+                    paint.color = if (isEven) Color.parseColor("#FAF7F4") else Color.WHITE
+                    paint.style = Paint.Style.FILL
+                    canvas.drawRect(32f, rowY, (pageWidth - 32).toFloat(), rowY + 24f, paint)
+
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                    paint.color = Color.parseColor("#424242")
+                    canvas.drawText(shortDateFormat.format(Date(tx.timestamp)), 40f, rowY + 16f, paint)
+
+                    val payeeText = if (tx.payee.length > 23) tx.payee.take(21) + ".." else tx.payee
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    paint.color = Color.parseColor("#212121")
+                    canvas.drawText(payeeText, 100f, rowY + 16f, paint)
+
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
+                    paint.color = Color.parseColor("#5D4037")
+                    val catText = if (tx.category.length > 17) tx.category.take(15) + ".." else tx.category
+                    canvas.drawText(catText, 248f, rowY + 16f, paint)
+
+                    val account = accountMap[tx.accountId]
+                    val accName = if (TwtAccountHelper.isTwtAccount(account)) {
+                        TwtAccountHelper.currentTwtAccountName()
+                    } else {
+                        account?.name ?: "Compte"
+                    }
+                    val accText = if (accName.length > 16) accName.take(14) + ".." else accName
+                    paint.color = Color.parseColor("#616161")
+                    canvas.drawText(accText, 358f, rowY + 16f, paint)
+
+                    val isIncome = tx.type == TransactionType.INCOME
+                    paint.color = if (isIncome) Color.parseColor("#1B4D3E") else Color.parseColor("#B71C1C")
+                    paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+                    val effectiveCurrency = Currencies.effectiveCurrencyCode(account, "CFA")
+                    val prefix = if (isIncome) "+" else "-"
+                    val amountStr = "$prefix${Currencies.format(tx.amount, effectiveCurrency)}"
+
+                    paint.textAlign = Paint.Align.RIGHT
+                    canvas.drawText(amountStr, (pageWidth - 40).toFloat(), rowY + 16f, paint)
+                    paint.textAlign = Paint.Align.LEFT
+
+                    paint.color = Color.parseColor("#E0D6CD")
+                    paint.style = Paint.Style.STROKE
+                    paint.strokeWidth = 0.5f
+                    canvas.drawLine(32f, rowY + 24f, (pageWidth - 32).toFloat(), rowY + 24f, paint)
+                    paint.style = Paint.Style.FILL
+                }
             }
 
             paint.color = Color.parseColor("#8D6E63")
@@ -241,18 +261,19 @@ object PdfReportExporter {
             doc.finishPage(page)
         }
 
-        return try {
             val reportsDir = File(context.cacheDir, "reports").apply { mkdirs() }
             val file = File(reportsDir, "balatec_rapport_${System.currentTimeMillis()}.pdf")
             FileOutputStream(file).use { out ->
                 doc.writeTo(out)
             }
-            doc.close()
             file
         } catch (e: Exception) {
             e.printStackTrace()
-            doc.close()
             null
+        } finally {
+            try {
+                doc?.close()
+            } catch (_: Exception) { }
         }
     }
 

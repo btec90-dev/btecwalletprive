@@ -79,33 +79,38 @@ Top Header Bar:
 4 Bottom Navigation Tabs (MainActivity.kt):
 1. Grand Livre / Ledger (LedgerScreen.kt)
    - Transaction list with search bar, type/category/amount/date-range filters, batch select/delete
-   - Embedded Analytics summary modal/panel (AnalyticsScreen.kt - CFA totals excluding TWT USD)
+   - Quick Family Contact (21 presets) & City (Bamako, Abidjan) filter chip bar with filtered CFA total summary (BigDecimal)
+   - Embedded Analytics summary modal/panel (AnalyticsScreen.kt - BigDecimal CFA totals excluding TWT USD)
    - Recurring Transactions schedule sheet (RecurringTransactionsSheet.kt)
    - Add / Edit Transaction Modal Bottom Sheet:
+     * Optional FX / Remittance Mode toggle (Amount Sent USD + Transfer Fee USD + Exchange Rate -> Net CFA = Amount * Rate; deducts Amount+Fee in USD and credits Net CFA)
      * Quick-Add TWT [Year] ($) shortcut (Admin only, auto-sets Bonus + INCOME + USD $)
      * Account selector + inline Quick-Create Account (Tap Tap Send, MoneyGram, Transfert presets)
      * 21 Preset Family Contacts quick-chips & Payee autocomplete
      * Interactive Calendar Picker Modal (EN/FR localized, Today/Yesterday pills, timezone-safe local YYYY-MM-DD)
      * Keyboard-aware scroll with imePadding + BringIntoViewRequester
 2. Comptes / Accounts (AccountsScreen.kt)
-   - Net Worth CFA Hero Card + Income/Expense summary
-   - Dedicated TWT [Year] USD ($) Hero Badge (Admin 410bala@gmail.com only)
+   - Net Worth CFA Hero Card + Income/Expense summary (BigDecimal exact)
+   - Dedicated TWT [Year] USD ($) Hero Badge (Admin 410bala@gmail.com only when TWT Visible is ON)
    - Smart Accounts sorted by priority: CASH -> CARD -> SAVINGS -> CUSTOM
    - Slide-to-delete disabled to prevent accidental deletion; Edit & Delete via explicit 3-dot menu + confirmation dialog
+   - TWT 2026 card visually distinguished with metallic border, embossed PRIVÉ/PRIVATE lock badge, and explicit USD ($) badge
+   - Tapping or editing TWT 2026 always requires BiometricPrompt or 4-digit PIN (even if general app lock is off)
    - Account Edit Sheet with Tap Tap Send / MoneyGram / Transfert presets & strict USD ($) lock on TWT
 3. Catégories / Categories (CategoriesScreen.kt)
-   - 21 default categories (including Bonus, Famille, Transfert, MoneyGram, Tap Tap Send, Bamako, Abidjan)
+   - 18 default categories (including Bonus, Famille, Bamako, Abidjan; payment rails removed from categories)
    - Custom category creation (name + emoji icon) and deletion, synced across devices
 4. Paramètres / Settings (SettingsScreen.kt)
    - User Profile & Role Card (Active email, role badge, Login / Switch User / Disconnect)
-   - Admin-Only App Details & Design (.txt) Card (410bala@gmail.com only; live view, copy & share .txt)
+   - Admin-Only TWT Visibility toggle (410bala@gmail.com only; requires BiometricPrompt or 4-digit PIN to switch ON)
+   - Admin-Only App Details & Design (.txt) Card (410bala@gmail.com only; DB ID & emails masked by default with optional "Include Sensitive IDs" toggle; live view, copy & share .txt)
    - 10-Theme Artisan Leather Swatch Grid
    - Cloud Backup & Multi-Device Sync Card (Firestore real-time sync toggle, Google Sign-In, Sync Now)
    - Security & PIN Lock (4-digit PIN + Android BiometricPrompt)
    - Base Currency Selector (CFA / USD)
    - Language Switcher (Français / English)
    - Export & Import Dialog (ExportImportDialog.kt):
-     * Flexible PDF Export (PdfReportExporter.kt): Filter by All, Account, Payee, Category, Date Range, Income/Expense
+     * Flexible PDF Export (PdfReportExporter.kt): Filter by All, Account, Payee, Category, Date Range, Income/Expense (safe with 0 transactions)
      * JSON Backup Export/Import & CSV Ledger Export
    - Clear All Transactions confirmation dialog
 
@@ -114,6 +119,7 @@ Top Header Bar:
 --------------------------------------------------------------------------------
 Currencies (data/model/Currency.kt):
 - Supported: USD ($) and CFA ("#,##0.00 CFA" — never "FCFA"; legacy FCFA/XOF automatically normalized to CFA)
+- Precision: BigDecimal (HALF_UP scale 2) used for all balances, FX conversions, and report totals (never Float/Double accumulation)
 - TWT Dynamic Rules (TwtAccountHelper in data/model/Account.kt):
   * Any account containing "TWT" dynamically normalizes to "TWT <CurrentYear>" (e.g., TWT 2026)
   * Type: SAVINGS | Avatar: 🪙 | Currency strictly locked to USD ($)
@@ -121,15 +127,19 @@ Currencies (data/model/Currency.kt):
 
 Local Database (Room - WalletDatabase.kt):
 - Tables: accounts, transactions, recurring_transactions, contacts
+- Deterministic Default Seed Account IDs (SeedAccountIds):
+  * seed_especes_cfa, seed_carte_bancaire, seed_tap_tap_send, seed_moneygram, seed_transfert, seed_twt_2026
+  * Room uses OnConflictStrategy.IGNORE; startup normalization deduplicates 0.00 duplicates down to 6 canonical records
 - Custom categories persisted in SharedPreferences & synced to Firestore
 
 Cloud Sync & Firestore Isolation (firestore.rules & CloudSyncManager.kt):
 - Database ID: ai-studio-android-balatecs-4baf2e8b-4fe1-4d7a-a144-fd45aa8e45ca
+- Sync writes use SetOptions.merge() with deterministic document IDs to prevent duplicate seed accounts across devices
 - Shared Data (both 410bala@gmail.com & traore200@gmail.com):
   * shared_wallets/balatec_shared/{accounts, transactions, recurring, categories}
   * Strictly forbids TWT accounts/transactions (rejected by rules & client filters)
 - Private TWT Data (410bala@gmail.com Primary Admin ONLY):
-  * private_twt/admin_only/{accounts, transactions, recurring}
+  * private_twt/{document=**} (enforces request.auth != null && request.auth.token.email == '410bala@gmail.com' && email_verified == true)
   * Completely hidden from traore200@gmail.com across sync, UI, totals, Quick-Add, and PDF/JSON/CSV exports
 
 --------------------------------------------------------------------------------
@@ -144,6 +154,7 @@ Authentication Methods:
 - Google Sign-In via Jetpack CredentialManager (GetSignInWithGoogleOption / GetGoogleIdOption) + Firebase Auth
 - Authorized Email + Case-Sensitive Passcode Switcher (validated via BuildConfig.ADMIN_PASSCODE / SECONDARY_PASSCODE from AI Studio Secrets; never hardcoded)
 - Local Lock Screen (LockScreen.kt): 4-digit PIN + BiometricPrompt (USE_BIOMETRIC)
+- Sensitive TWT Challenge (TwtSecurityChallengeDialog.kt): Enforces BiometricPrompt or 4-digit PIN on "TWT Visible" enable & opening "TWT 2026" account card
 
 Permissions (AndroidManifest.xml):
 - android.permission.INTERNET

@@ -36,9 +36,6 @@ object WalletCategories {
     val ALL = listOf(
         "Bonus" to "💎",
         "Famille" to "👨‍👩‍👧‍👦",
-        "Transfert" to "🔄",
-        "MoneyGram" to "💸",
-        "Tap Tap Send" to "📲",
         "Bamako" to "🇲🇱",
         "Abidjan" to "🇨🇮",
         "Food & Dining" to "🍔",
@@ -97,11 +94,13 @@ object PresetFamilyContacts {
         "Fatou ma Femme"
     )
 
+    val CITIES = listOf(
+        "Bamako" to "🇲🇱",
+        "Abidjan" to "🇨🇮"
+    )
+
     val REMITTANCE_FAMILY_CATEGORIES = setOf(
         "Famille",
-        "Transfert",
-        "MoneyGram",
-        "Tap Tap Send",
         "Bamako",
         "Abidjan"
     )

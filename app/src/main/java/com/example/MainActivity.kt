@@ -251,6 +251,8 @@ fun MainWalletApp(
     val currentLanguage by viewModel.currentLanguage.collectAsState()
     val isPinEnabled by viewModel.isPinEnabled.collectAsState()
     val isBiometricEnabled by viewModel.isBiometricEnabled.collectAsState()
+    val isTwtVisibleEnabled by viewModel.isTwtVisibleEnabled.collectAsState()
+    val includeSensitiveIdsInSpec by viewModel.includeSensitiveIdsInSpec.collectAsState()
 
     var showAuthGateSheet by remember { mutableStateOf(false) }
     var showExportImportDialog by remember { mutableStateOf(false) }
@@ -442,8 +444,11 @@ fun MainWalletApp(
                     recurringList = recurringTransactions,
                     customCategories = customCategories,
                     baseCurrency = baseCurrency,
-                    isAdminTwtVisible = accessSession.isAdminTwtVisible,
+                    isAdminTwtVisible = accessSession.isAdminTwtVisible && isTwtVisibleEnabled,
                     onAddTransaction = { viewModel.addTransaction(it) },
+                    onSaveRemittanceFx = { usdAccId, cfaAccId, amtUsd, feeUsd, rate, payee, cat, ts, notes ->
+                        viewModel.addRemittanceFx(usdAccId, cfaAccId, amtUsd, feeUsd, rate, payee, cat, ts, notes)
+                    },
                     onUpdateTransaction = { oldTx, newTx -> viewModel.updateTransaction(oldTx, newTx) },
                     onDeleteTransaction = { viewModel.deleteTransaction(it) },
                     onDeleteTransactions = { viewModel.deleteTransactions(it) },
@@ -463,6 +468,8 @@ fun MainWalletApp(
                     totalExpense = totalExpense,
                     baseCurrency = baseCurrency,
                     twtUsdBalance = twtUsdBalance,
+                    activity = activity,
+                    securityManager = viewModel.securityManager,
                     onAddAccount = { name, type, balance, cur, emoji ->
                         viewModel.addAccount(name, type, balance, cur, emoji)
                     },
@@ -481,8 +488,12 @@ fun MainWalletApp(
                     syncState = syncState,
                     accessSession = accessSession,
                     adminDesignSpecText = adminDesignSpecText,
+                    isTwtVisibleEnabled = isTwtVisibleEnabled,
+                    includeSensitiveIdsInSpec = includeSensitiveIdsInSpec,
                     isPinEnabled = isPinEnabled,
                     isBiometricEnabled = isBiometricEnabled,
+                    activity = activity,
+                    securityManager = viewModel.securityManager,
                     onThemeSelected = { viewModel.setTheme(it) },
                     onCurrencySelected = { viewModel.setBaseCurrency(it) },
                     onLanguageSelected = { viewModel.setLanguage(it) },
@@ -490,8 +501,8 @@ fun MainWalletApp(
                     onToggleSync = { enabled ->
                         if (enabled && !syncState.isAuthenticated) {
                             showAuthGateSheet = true
-                        } else if (!enabled) {
-                            viewModel.cloudSyncManager.disableSync()
+                        } else {
+                            viewModel.toggleSync(enabled)
                         }
                     },
                     onSyncNow = { viewModel.syncNow() },
@@ -499,6 +510,8 @@ fun MainWalletApp(
                         val credentialManager = androidx.credentials.CredentialManager.create(context)
                         viewModel.signOutCloud(credentialManager)
                     },
+                    onToggleTwtVisibility = { viewModel.setTwtVisibleEnabled(it) },
+                    onToggleIncludeSensitiveIds = { viewModel.setIncludeSensitiveIdsInSpec(it) },
                     onTogglePin = { viewModel.togglePin(it) },
                     onSetPin = { viewModel.setPin(it) },
                     onToggleBiometric = { viewModel.toggleBiometric(it) },

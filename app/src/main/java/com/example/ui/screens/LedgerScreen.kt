@@ -119,6 +119,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import androidx.compose.material.icons.filled.CurrencyExchange
 import com.example.data.model.AccountEntity
 import com.example.data.model.Currencies
 import com.example.data.model.PresetFamilyContacts
@@ -128,10 +129,13 @@ import com.example.data.model.WalletCategories
 import com.example.ui.components.ArtisanCard
 import com.example.ui.theme.LocalArtisanTheme
 import com.example.util.PdfReportExporter
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import kotlin.math.abs
 
 enum class DateRangeFilterType {
     ALL,
@@ -149,6 +153,17 @@ fun LedgerScreen(
     baseCurrency: String,
     isAdminTwtVisible: Boolean = false,
     onAddTransaction: (TransactionEntity) -> Unit,
+    onSaveRemittanceFx: (
+        usdAccountId: String,
+        cfaAccountId: String,
+        amountSentUsd: BigDecimal,
+        feeUsd: BigDecimal,
+        rateUsdToCfa: BigDecimal,
+        payee: String,
+        category: String,
+        timestamp: Long,
+        notes: String
+    ) -> Unit = { _, _, _, _, _, _, _, _, _ -> },
     onUpdateTransaction: (oldTx: TransactionEntity, newTx: TransactionEntity) -> Unit,
     onDeleteTransaction: (TransactionEntity) -> Unit,
     onDeleteTransactions: (List<TransactionEntity>) -> Unit = { list -> list.forEach { onDeleteTransaction(it) } },
@@ -168,6 +183,7 @@ fun LedgerScreen(
     var selectedTypeFilter by remember { mutableStateOf<TransactionType?>(null) } // null = All
     var selectedCategoryFilter by remember { mutableStateOf<String?>(null) }
     var selectedAccountFilter by remember { mutableStateOf<String?>(null) }
+    var selectedFamilyOrCityFilter by remember { mutableStateOf<String?>(null) }
     var minAmountFilter by remember { mutableStateOf<Double?>(null) }
     var maxAmountFilter by remember { mutableStateOf<Double?>(null) }
 
@@ -215,6 +231,7 @@ fun LedgerScreen(
         selectedTypeFilter,
         selectedCategoryFilter,
         selectedAccountFilter,
+        selectedFamilyOrCityFilter,
         minAmountFilter,
         maxAmountFilter
     ) {
@@ -234,16 +251,24 @@ fun LedgerScreen(
             val matchesType = selectedTypeFilter == null || tx.type == selectedTypeFilter
             val matchesCategory = selectedCategoryFilter == null || tx.category.equals(selectedCategoryFilter, ignoreCase = true)
             val matchesAccount = selectedAccountFilter == null || tx.accountId == selectedAccountFilter
+            val matchesFamilyOrCity = selectedFamilyOrCityFilter.let { filterLabel ->
+                if (filterLabel.isNullOrBlank()) true else {
+                    tx.payee.contains(filterLabel, ignoreCase = true) ||
+                        tx.category.equals(filterLabel, ignoreCase = true) ||
+                        tx.notes.contains(filterLabel, ignoreCase = true)
+                }
+            }
             val matchesMin = minAmountFilter == null || tx.amount >= minAmountFilter!!
             val matchesMax = maxAmountFilter == null || tx.amount <= maxAmountFilter!!
 
-            matchesQuery && matchesDate && matchesType && matchesCategory && matchesAccount && matchesMin && matchesMax
+            matchesQuery && matchesDate && matchesType && matchesCategory && matchesAccount && matchesFamilyOrCity && matchesMin && matchesMax
         }
     }
 
     val isFilterActive = selectedTypeFilter != null ||
             selectedCategoryFilter != null ||
             selectedAccountFilter != null ||
+            selectedFamilyOrCityFilter != null ||
             minAmountFilter != null ||
             maxAmountFilter != null ||
             selectedDateRange != DateRangeFilterType.ALL ||
@@ -707,6 +732,7 @@ fun LedgerScreen(
                                 selectedTypeFilter = null
                                 selectedCategoryFilter = null
                                 selectedAccountFilter = null
+                                selectedFamilyOrCityFilter = null
                                 minAmountFilter = null
                                 maxAmountFilter = null
                             }) {
@@ -714,6 +740,102 @@ fun LedgerScreen(
                                     stringResource(R.string.clear_filters),
                                     color = MaterialTheme.colorScheme.error,
                                     style = MaterialTheme.typography.labelSmall
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Family Contact (21 Presets) & City (Bamako, Abidjan) Quick Filter Chip Bar
+                if (!isSelectionMode) {
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp)
+                            .testTag("family_city_filter_bar"),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        items(PresetFamilyContacts.CITIES, key = { "city_${it.first}" }) { (city, flag) ->
+                            val isSel = selectedFamilyOrCityFilter.equals(city, ignoreCase = true)
+                            FilterChip(
+                                selected = isSel,
+                                onClick = {
+                                    selectedFamilyOrCityFilter = if (isSel) null else city
+                                },
+                                label = { Text("$flag $city", fontSize = 12.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = theme.primaryColor,
+                                    selectedLabelColor = theme.onPrimaryColor
+                                )
+                            )
+                        }
+                        items(PresetFamilyContacts.NAMES, key = { "fam_$it" }) { contactName ->
+                            val isSel = selectedFamilyOrCityFilter.equals(contactName, ignoreCase = true)
+                            FilterChip(
+                                selected = isSel,
+                                onClick = {
+                                    selectedFamilyOrCityFilter = if (isSel) null else contactName
+                                },
+                                label = { Text("👤 $contactName", fontSize = 12.sp, fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = theme.primaryColor,
+                                    selectedLabelColor = theme.onPrimaryColor
+                                )
+                            )
+                        }
+                    }
+
+                    // Filtered Total in CFA Banner when Family Contact or City filter is active
+                    selectedFamilyOrCityFilter?.let { activeLabel ->
+                        val cfaMatching = remember(filteredTransactions, accountsMap) {
+                            filteredTransactions.filter { tx ->
+                                val acc = accountsMap[tx.accountId]
+                                Currencies.effectiveCurrencyCode(acc, "CFA") == "CFA"
+                            }
+                        }
+                        val cfaTotalBd = remember(cfaMatching) {
+                            Currencies.sumAmounts(cfaMatching.map { abs(it.amount) })
+                        }
+                        val cfaIncomeBd = remember(cfaMatching) {
+                            Currencies.sumAmounts(cfaMatching.filter { it.type == TransactionType.INCOME }.map { it.amount })
+                        }
+                        val cfaExpenseBd = remember(cfaMatching) {
+                            Currencies.sumAmounts(cfaMatching.filter { it.type == TransactionType.EXPENSE }.map { it.amount })
+                        }
+                        ArtisanCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .testTag("family_city_filtered_total"),
+                            containerColor = theme.primaryContainer.copy(alpha = 0.72f),
+                            elevation = 1.dp
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${stringResource(R.string.filtered_cfa_total)} • $activeLabel",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = theme.primaryColor
+                                    )
+                                    Text(
+                                        text = "${cfaMatching.size} op. CFA (+${Currencies.format(cfaIncomeBd, "CFA")} / -${Currencies.format(cfaExpenseBd, "CFA")})",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = theme.secondaryTextColor
+                                    )
+                                }
+                                Text(
+                                    text = Currencies.format(cfaTotalBd, "CFA"),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = theme.primaryColor
                                 )
                             }
                         }
@@ -919,6 +1041,11 @@ fun LedgerScreen(
             },
             onSave = { newTx ->
                 onAddTransaction(newTx)
+                showAddSheet = false
+                showQuickTwtSheet = false
+            },
+            onSaveRemittanceFx = { usdAccId, cfaAccId, amtUsd, feeUsd, rate, payeeName, cat, ts, txNotes ->
+                onSaveRemittanceFx(usdAccId, cfaAccId, amtUsd, feeUsd, rate, payeeName, cat, ts, txNotes)
                 showAddSheet = false
                 showQuickTwtSheet = false
             },
@@ -1562,6 +1689,17 @@ fun TransactionFormSheet(
     initialTwtMode: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (TransactionEntity) -> Unit,
+    onSaveRemittanceFx: ((
+        usdAccountId: String,
+        cfaAccountId: String,
+        amountSentUsd: BigDecimal,
+        feeUsd: BigDecimal,
+        rateUsdToCfa: BigDecimal,
+        payee: String,
+        category: String,
+        timestamp: Long,
+        notes: String
+    ) -> Unit)? = null,
     onQuickCreateAccount: ((name: String, type: AccountType, balance: Double, currency: String, emoji: String, onCreated: (String) -> Unit) -> Unit)? = null,
     onScheduleRecurring: ((RecurringTransactionEntity) -> Unit)? = null
 ) {
@@ -1575,6 +1713,20 @@ fun TransactionFormSheet(
         accounts.firstOrNull { !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it, "CFA") == "CFA" }
             ?: accounts.firstOrNull()
     }
+    val defaultUsdAccount = remember(accounts) {
+        accounts.firstOrNull { Currencies.effectiveCurrencyCode(it, "CFA") == "USD" }
+            ?: twtAccount
+            ?: accounts.firstOrNull()
+    }
+
+    var isFxMode by remember { mutableStateOf(false) }
+    var fxAmountUsdText by remember { mutableStateOf("") }
+    var fxFeeUsdText by remember { mutableStateOf("0.00") }
+    var fxRateText by remember { mutableStateOf("605") }
+    var fxUsdAccountId by remember(defaultUsdAccount) { mutableStateOf(defaultUsdAccount?.id ?: "") }
+    var fxCfaAccountId by remember(defaultNonTwtCfa) { mutableStateOf(defaultNonTwtCfa?.id ?: "") }
+    var showFxUsdPickerDialog by remember { mutableStateOf(false) }
+    var showFxCfaPickerDialog by remember { mutableStateOf(false) }
 
     var type by remember {
         mutableStateOf(
@@ -1619,7 +1771,7 @@ fun TransactionFormSheet(
     }
 
     val selectedAccount = accounts.firstOrNull { it.id == accountId }
-    val isTwtSelected = TwtAccountHelper.isTwtAccount(selectedAccount)
+    val isTwtSelected = !isFxMode && TwtAccountHelper.isTwtAccount(selectedAccount)
 
     var selectedCurrency by remember {
         mutableStateOf(
@@ -1655,6 +1807,20 @@ fun TransactionFormSheet(
     val amountBringIntoView = remember { BringIntoViewRequester() }
     val notesBringIntoView = remember { BringIntoViewRequester() }
 
+    val parsedFxAmt = Currencies.parseBigDecimal(fxAmountUsdText) ?: BigDecimal.ZERO
+    val parsedFxFee = Currencies.parseBigDecimal(fxFeeUsdText) ?: BigDecimal.ZERO
+    val parsedFxRate = Currencies.parseBigDecimal(fxRateText) ?: BigDecimal.ZERO
+    val fxTotalUsd = if (parsedFxAmt.compareTo(BigDecimal.ZERO) > 0 && parsedFxFee.compareTo(BigDecimal.ZERO) >= 0) {
+        Currencies.computeTotalUsdDeduction(parsedFxAmt, parsedFxFee)
+    } else {
+        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+    }
+    val fxNetCfa = if (parsedFxAmt.compareTo(BigDecimal.ZERO) > 0 && parsedFxRate.compareTo(BigDecimal.ZERO) > 0) {
+        Currencies.computeNetCfaFromFx(parsedFxAmt, parsedFxRate)
+    } else {
+        BigDecimal.ZERO.setScale(2, RoundingMode.HALF_UP)
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
@@ -1672,7 +1838,11 @@ fun TransactionFormSheet(
         ) {
             Text(
                 text = if (transaction == null) {
-                    if (isTwtSelected) "Ajouter • ${TwtAccountHelper.currentTwtAccountName()} ($ USD)" else stringResource(R.string.add_transaction)
+                    when {
+                        isFxMode -> stringResource(R.string.fx_mode_toggle)
+                        isTwtSelected -> "Ajouter • ${TwtAccountHelper.currentTwtAccountName()} ($ USD)"
+                        else -> stringResource(R.string.add_transaction)
+                    }
                 } else {
                     stringResource(R.string.edit_transaction)
                 },
@@ -1681,31 +1851,95 @@ fun TransactionFormSheet(
                 color = theme.primaryColor
             )
 
-            // Type Toggle: Income vs Expense
-            TabRow(
-                selectedTabIndex = if (type == TransactionType.EXPENSE) 0 else 1,
-                containerColor = theme.backgroundColor,
-                contentColor = theme.primaryColor,
-                modifier = Modifier.clip(RoundedCornerShape(12.dp))
-            ) {
-                Tab(
-                    selected = type == TransactionType.EXPENSE,
-                    onClick = { type = TransactionType.EXPENSE },
-                    text = { Text(stringResource(R.string.filter_expense), fontWeight = FontWeight.Bold) }
-                )
-                Tab(
-                    selected = type == TransactionType.INCOME,
-                    onClick = { type = TransactionType.INCOME },
-                    text = { Text(stringResource(R.string.filter_income), fontWeight = FontWeight.Bold) }
-                )
+            // Optional FX / Remittance Mode Toggle (new transactions only)
+            if (transaction == null && onSaveRemittanceFx != null) {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = if (isFxMode) theme.primaryContainer else theme.backgroundColor,
+                    border = BorderStroke(
+                        1.dp,
+                        if (isFxMode) theme.primaryColor else theme.stitchingColor.copy(alpha = 0.45f)
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.CurrencyExchange,
+                                contentDescription = null,
+                                tint = theme.primaryColor,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.fx_mode_toggle),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = theme.primaryColor
+                                )
+                                Text(
+                                    text = stringResource(R.string.fx_mode_sub),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = theme.secondaryTextColor,
+                                    fontSize = 11.sp
+                                )
+                            }
+                        }
+                        Switch(
+                            checked = isFxMode,
+                            onCheckedChange = { enabled ->
+                                isFxMode = enabled
+                                errorMessage = null
+                                if (enabled && category == "Bonus") {
+                                    category = "Famille"
+                                }
+                            },
+                            modifier = Modifier.testTag("switch_fx_remittance_mode"),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = theme.onPrimaryColor,
+                                checkedTrackColor = theme.primaryColor
+                            )
+                        )
+                    }
+                }
             }
 
-            // Amount Input with Quick Currency Switcher Pill (Locked to $ when TWT is selected)
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            if (!isFxMode) {
+                // Type Toggle: Income vs Expense
+                TabRow(
+                    selectedTabIndex = if (type == TransactionType.EXPENSE) 0 else 1,
+                    containerColor = theme.backgroundColor,
+                    contentColor = theme.primaryColor,
+                    modifier = Modifier.clip(RoundedCornerShape(12.dp))
+                ) {
+                    Tab(
+                        selected = type == TransactionType.EXPENSE,
+                        onClick = { type = TransactionType.EXPENSE },
+                        text = { Text(stringResource(R.string.filter_expense), fontWeight = FontWeight.Bold) }
+                    )
+                    Tab(
+                        selected = type == TransactionType.INCOME,
+                        onClick = { type = TransactionType.INCOME },
+                        text = { Text(stringResource(R.string.filter_income), fontWeight = FontWeight.Bold) }
+                    )
+                }
+
+                // Amount Input with Quick Currency Switcher Pill (Locked to $ when TWT is selected)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
                 OutlinedTextField(
                     value = amountText,
                     onValueChange = { amountText = it; errorMessage = null },
@@ -1799,6 +2033,103 @@ fun TransactionFormSheet(
                                     color = if (selectedCurrency == "USD") theme.onPrimaryColor else theme.primaryColor
                                 )
                             }
+                        }
+                    }
+                }
+            }
+            } else {
+                // FX / Remittance Mode Inputs (Amount USD, Fee USD, Exchange Rate -> Live Net Received CFA)
+                OutlinedTextField(
+                    value = fxAmountUsdText,
+                    onValueChange = { fxAmountUsdText = it; errorMessage = null },
+                    label = { Text(stringResource(R.string.fx_amount_sent_usd)) },
+                    prefix = { Text("$ ", fontWeight = FontWeight.Bold, color = theme.primaryColor) },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                    singleLine = true,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("fx_amount_usd_input"),
+                    shape = RoundedCornerShape(12.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedTextField(
+                        value = fxFeeUsdText,
+                        onValueChange = { fxFeeUsdText = it; errorMessage = null },
+                        label = { Text(stringResource(R.string.fx_fee_usd)) },
+                        prefix = { Text("$ ", fontWeight = FontWeight.Bold, color = theme.primaryColor) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("fx_fee_usd_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    OutlinedTextField(
+                        value = fxRateText,
+                        onValueChange = { fxRateText = it; errorMessage = null },
+                        label = { Text(stringResource(R.string.fx_exchange_rate)) },
+                        suffix = { Text(" CFA", fontWeight = FontWeight.Bold, color = theme.stitchingColor) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("fx_rate_input"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+
+                // Live Auto-Calculated FX Preview (BigDecimal exact)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = theme.primaryContainer.copy(alpha = 0.65f),
+                    border = BorderStroke(1.dp, theme.metallicAccent.copy(alpha = 0.7f)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("fx_calculation_preview")
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = stringResource(R.string.fx_total_deducted_usd),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = theme.secondaryTextColor
+                            )
+                            Text(
+                                text = "-${Currencies.format(fxTotalUsd, "USD")}",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFFC62828)
+                            )
+                        }
+                        HorizontalDivider(color = theme.stitchingColor.copy(alpha = 0.25f))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = stringResource(R.string.fx_net_received_cfa),
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = theme.primaryColor
+                            )
+                            Text(
+                                text = "+${Currencies.format(fxNetCfa, "CFA")}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color(0xFF2E7D32)
+                            )
                         }
                     }
                 }
@@ -1913,11 +2244,13 @@ fun TransactionFormSheet(
                                 onClick = {
                                     payee = contactName
                                     category = "Famille"
-                                    selectedCurrency = "CFA"
-                                    val cfaAcc = accounts.firstOrNull {
-                                        !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it, "CFA") == "CFA"
+                                    if (!isFxMode) {
+                                        selectedCurrency = "CFA"
+                                        val cfaAcc = accounts.firstOrNull {
+                                            !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it, "CFA") == "CFA"
+                                        }
+                                        if (cfaAcc != null) accountId = cfaAcc.id
                                     }
-                                    if (cfaAcc != null) accountId = cfaAcc.id
                                 },
                                 label = {
                                     Text(
@@ -1986,43 +2319,124 @@ fun TransactionFormSheet(
                 }
             }
 
-            // Account Modal Picker + Inline "+ Ajouter un compte" (Fixes dropdown failure on mobile!)
-            Surface(
-                onClick = { showAccountPickerDialog = true },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("account_selector_button"),
-                shape = RoundedCornerShape(12.dp),
-                color = theme.backgroundColor,
-                border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
-            ) {
-                Row(
+            if (!isFxMode) {
+                // Account Modal Picker + Inline "+ Ajouter un compte" (Fixes dropdown failure on mobile!)
+                Surface(
+                    onClick = { showAccountPickerDialog = true },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                        .testTag("account_selector_button"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = theme.backgroundColor,
+                    border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = stringResource(R.string.select_account),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray,
-                            fontSize = 11.sp
-                        )
-                        Spacer(modifier = Modifier.height(2.dp))
-                        Text(
-                            text = selectedAccount?.let {
-                                val displayName = if (TwtAccountHelper.isTwtAccount(it)) TwtAccountHelper.currentTwtAccountName() else it.name
-                                val curLabel = Currencies.effectiveCurrencyCode(it, "CFA")
-                                "${it.emojiAvatar} $displayName ($curLabel)"
-                            } ?: stringResource(R.string.select_account),
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                            color = theme.primaryColor
-                        )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 14.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.select_account),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = selectedAccount?.let {
+                                    val displayName = if (TwtAccountHelper.isTwtAccount(it)) TwtAccountHelper.currentTwtAccountName() else it.name
+                                    val curLabel = Currencies.effectiveCurrencyCode(it, "CFA")
+                                    "${it.emojiAvatar} $displayName ($curLabel)"
+                                } ?: stringResource(R.string.select_account),
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.SemiBold,
+                                color = theme.primaryColor
+                            )
+                        }
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
                     }
-                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
+                }
+            } else {
+                val selectedUsdAcc = accounts.firstOrNull { it.id == fxUsdAccountId }
+                val selectedCfaAcc = accounts.firstOrNull { it.id == fxCfaAccountId }
+
+                Surface(
+                    onClick = { showFxUsdPickerDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("fx_source_usd_picker"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = theme.backgroundColor,
+                    border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.fx_source_usd_account),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = selectedUsdAcc?.let {
+                                    val displayName = if (TwtAccountHelper.isTwtAccount(it)) TwtAccountHelper.currentTwtAccountName() else it.name
+                                    "${it.emojiAvatar} $displayName (${Currencies.formatForAccount(it.balance, it)})"
+                                } ?: stringResource(R.string.select_account),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = theme.primaryColor
+                            )
+                        }
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
+                    }
+                }
+
+                Surface(
+                    onClick = { showFxCfaPickerDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("fx_dest_cfa_picker"),
+                    shape = RoundedCornerShape(12.dp),
+                    color = theme.backgroundColor,
+                    border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = stringResource(R.string.fx_dest_cfa_account),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                                fontSize = 11.sp
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = selectedCfaAcc?.let {
+                                    val displayName = if (TwtAccountHelper.isTwtAccount(it)) TwtAccountHelper.currentTwtAccountName() else it.name
+                                    "${it.emojiAvatar} $displayName (${Currencies.formatForAccount(it.balance, it)})"
+                                } ?: stringResource(R.string.select_account),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = theme.primaryColor
+                            )
+                        }
+                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
+                    }
                 }
             }
 
@@ -2045,8 +2459,8 @@ fun TransactionFormSheet(
                 shape = RoundedCornerShape(12.dp)
             )
 
-            // Make Recurring Switch (Scheduled Auto-Ledger)
-            if (transaction == null && onScheduleRecurring != null) {
+            // Make Recurring Switch (Scheduled Auto-Ledger, standard mode only)
+            if (transaction == null && onScheduleRecurring != null && !isFxMode) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = theme.backgroundColor.copy(alpha = 0.6f),
@@ -2140,67 +2554,101 @@ fun TransactionFormSheet(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 TextButton(
+                    modifier = Modifier.testTag("tx_save_button"),
                     onClick = {
-                        val parsedAmount = amountText.toDoubleOrNull()
-                        if (parsedAmount == null || parsedAmount <= 0) {
-                            errorMessage = "Veuillez entrer un montant valide supérieur à 0."
-                        } else if (payee.isBlank()) {
-                            errorMessage = "Veuillez entrer un nom de bénéficiaire."
-                        } else if (accountId.isBlank()) {
-                            errorMessage = "Veuillez sélectionner un compte."
-                        } else {
-                            val dateParts = selectedDateYmd.split("-").mapNotNull { it.toIntOrNull() }
-                            val txCal = Calendar.getInstance()
-                            if (dateParts.size == 3) {
-                                txCal.set(Calendar.YEAR, dateParts[0])
-                                txCal.set(Calendar.MONTH, dateParts[1] - 1)
-                                txCal.set(Calendar.DAY_OF_MONTH, dateParts[2])
-                                txCal.set(Calendar.HOUR_OF_DAY, 12)
-                                txCal.set(Calendar.MINUTE, 0)
-                                txCal.set(Calendar.SECOND, 0)
-                                txCal.set(Calendar.MILLISECOND, 0)
+                        val dateParts = selectedDateYmd.split("-").mapNotNull { it.toIntOrNull() }
+                        val txCal = Calendar.getInstance()
+                        if (dateParts.size == 3) {
+                            txCal.set(Calendar.YEAR, dateParts[0])
+                            txCal.set(Calendar.MONTH, dateParts[1] - 1)
+                            txCal.set(Calendar.DAY_OF_MONTH, dateParts[2])
+                            txCal.set(Calendar.HOUR_OF_DAY, 12)
+                            txCal.set(Calendar.MINUTE, 0)
+                            txCal.set(Calendar.SECOND, 0)
+                            txCal.set(Calendar.MILLISECOND, 0)
+                        }
+                        val finalTimestamp = txCal.timeInMillis
+
+                        if (isFxMode && transaction == null && onSaveRemittanceFx != null) {
+                            val amtBd = Currencies.parseBigDecimal(fxAmountUsdText)
+                            val feeBd = Currencies.parseBigDecimal(fxFeeUsdText) ?: BigDecimal.ZERO
+                            val rateBd = Currencies.parseBigDecimal(fxRateText)
+
+                            if (amtBd == null || amtBd.compareTo(BigDecimal.ZERO) <= 0) {
+                                errorMessage = "Veuillez entrer un montant USD envoyé valide (> 0)."
+                            } else if (feeBd.compareTo(BigDecimal.ZERO) < 0) {
+                                errorMessage = "Les frais de transfert ne peuvent pas être négatifs."
+                            } else if (rateBd == null || rateBd.compareTo(BigDecimal.ZERO) <= 0) {
+                                errorMessage = "Veuillez entrer un taux de change valide (> 0)."
+                            } else if (payee.isBlank()) {
+                                errorMessage = "Veuillez entrer un nom de bénéficiaire."
+                            } else if (fxUsdAccountId.isBlank() || fxCfaAccountId.isBlank()) {
+                                errorMessage = "Veuillez sélectionner les comptes source USD et destination CFA."
+                            } else if (accounts.size > 1 && fxUsdAccountId == fxCfaAccountId) {
+                                errorMessage = "Sélectionnez un compte source USD distinct du compte destination CFA."
+                            } else {
+                                onSaveRemittanceFx(
+                                    fxUsdAccountId,
+                                    fxCfaAccountId,
+                                    amtBd.setScale(2, RoundingMode.HALF_UP),
+                                    feeBd.setScale(2, RoundingMode.HALF_UP),
+                                    rateBd,
+                                    payee.trim(),
+                                    category,
+                                    finalTimestamp,
+                                    notes.trim()
+                                )
                             }
-                            val finalTimestamp = txCal.timeInMillis
-
-                            val entity = transaction?.copy(
-                                accountId = accountId,
-                                type = type,
-                                amount = parsedAmount,
-                                payee = payee.trim(),
-                                category = category,
-                                notes = notes.trim(),
-                                timestamp = finalTimestamp,
-                                updatedAt = System.currentTimeMillis()
-                            ) ?: TransactionEntity(
-                                accountId = accountId,
-                                type = type,
-                                amount = parsedAmount,
-                                payee = payee.trim(),
-                                category = category,
-                                notes = notes.trim(),
-                                timestamp = finalTimestamp,
-                                updatedAt = System.currentTimeMillis()
-                            )
-                            onSave(entity)
-
-                            if (isRecurring && onScheduleRecurring != null) {
-                                val now = System.currentTimeMillis()
-                                val nextDue = recurrenceFrequency.computeNextDueDate(now)
-                                val recurringEntity = RecurringTransactionEntity(
+                        } else {
+                            val parsedAmountBd = Currencies.parseBigDecimal(amountText)
+                            if (parsedAmountBd == null || parsedAmountBd.compareTo(BigDecimal.ZERO) <= 0) {
+                                errorMessage = "Veuillez entrer un montant valide supérieur à 0."
+                            } else if (payee.isBlank()) {
+                                errorMessage = "Veuillez entrer un nom de bénéficiaire."
+                            } else if (accountId.isBlank()) {
+                                errorMessage = "Veuillez sélectionner un compte."
+                            } else {
+                                val roundedAmount = parsedAmountBd.setScale(2, RoundingMode.HALF_UP).toDouble()
+                                val entity = transaction?.copy(
                                     accountId = accountId,
                                     type = type,
-                                    amount = parsedAmount,
+                                    amount = roundedAmount,
                                     payee = payee.trim(),
                                     category = category,
-                                    frequency = recurrenceFrequency,
-                                    startDate = now,
-                                    lastExecutedDate = now,
-                                    nextDueDate = nextDue,
-                                    isActive = true,
                                     notes = notes.trim(),
-                                    updatedAt = now
+                                    timestamp = finalTimestamp,
+                                    updatedAt = System.currentTimeMillis()
+                                ) ?: TransactionEntity(
+                                    accountId = accountId,
+                                    type = type,
+                                    amount = roundedAmount,
+                                    payee = payee.trim(),
+                                    category = category,
+                                    notes = notes.trim(),
+                                    timestamp = finalTimestamp,
+                                    updatedAt = System.currentTimeMillis()
                                 )
-                                onScheduleRecurring(recurringEntity)
+                                onSave(entity)
+
+                                if (isRecurring && onScheduleRecurring != null) {
+                                    val now = System.currentTimeMillis()
+                                    val nextDue = recurrenceFrequency.computeNextDueDate(now)
+                                    val recurringEntity = RecurringTransactionEntity(
+                                        accountId = accountId,
+                                        type = type,
+                                        amount = roundedAmount,
+                                        payee = payee.trim(),
+                                        category = category,
+                                        frequency = recurrenceFrequency,
+                                        startDate = now,
+                                        lastExecutedDate = now,
+                                        nextDueDate = nextDue,
+                                        isActive = true,
+                                        notes = notes.trim(),
+                                        updatedAt = now
+                                    )
+                                    onScheduleRecurring(recurringEntity)
+                                }
                             }
                         }
                     }
@@ -2368,6 +2816,114 @@ fun TransactionFormSheet(
 
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                         TextButton(onClick = { showAccountPickerDialog = false }) {
+                            Text(stringResource(R.string.close))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showFxUsdPickerDialog) {
+        val sortedUsdFirst = remember(accounts) {
+            accounts.sortedByDescending { Currencies.effectiveCurrencyCode(it, "CFA") == "USD" }
+        }
+        Dialog(onDismissRequest = { showFxUsdPickerDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = theme.surfaceColor,
+                border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+                    Text(
+                        text = stringResource(R.string.fx_source_usd_account),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryColor
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LazyColumn(modifier = Modifier.fillMaxWidth().height(260.dp)) {
+                        items(sortedUsdFirst, key = { it.id }) { acc ->
+                            val isSel = acc.id == fxUsdAccountId
+                            val displayName = if (TwtAccountHelper.isTwtAccount(acc)) TwtAccountHelper.currentTwtAccountName() else acc.name
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) theme.primaryContainer else Color.Transparent)
+                                    .clickable {
+                                        fxUsdAccountId = acc.id
+                                        showFxUsdPickerDialog = false
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(acc.emojiAvatar, fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(displayName, fontWeight = FontWeight.SemiBold, color = theme.primaryColor)
+                                    Text(Currencies.formatForAccount(acc.balance, acc), style = MaterialTheme.typography.labelSmall, color = theme.secondaryTextColor)
+                                }
+                                if (isSel) Icon(Icons.Default.Check, contentDescription = null, tint = theme.primaryColor, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showFxUsdPickerDialog = false }) {
+                            Text(stringResource(R.string.close))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showFxCfaPickerDialog) {
+        val sortedCfaFirst = remember(accounts) {
+            accounts.filter { !TwtAccountHelper.isTwtAccount(it) }
+                .ifEmpty { accounts }
+        }
+        Dialog(onDismissRequest = { showFxCfaPickerDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = theme.surfaceColor,
+                border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+                    Text(
+                        text = stringResource(R.string.fx_dest_cfa_account),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryColor
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LazyColumn(modifier = Modifier.fillMaxWidth().height(260.dp)) {
+                        items(sortedCfaFirst, key = { it.id }) { acc ->
+                            val isSel = acc.id == fxCfaAccountId
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) theme.primaryContainer else Color.Transparent)
+                                    .clickable {
+                                        fxCfaAccountId = acc.id
+                                        showFxCfaPickerDialog = false
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(acc.emojiAvatar, fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(acc.name, fontWeight = FontWeight.SemiBold, color = theme.primaryColor)
+                                    Text(Currencies.formatForAccount(acc.balance, acc), style = MaterialTheme.typography.labelSmall, color = theme.secondaryTextColor)
+                                }
+                                if (isSel) Icon(Icons.Default.Check, contentDescription = null, tint = theme.primaryColor, modifier = Modifier.size(18.dp))
+                            }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showFxCfaPickerDialog = false }) {
                             Text(stringResource(R.string.close))
                         }
                     }
@@ -2562,8 +3118,8 @@ fun FilterBottomSheet(
                 Spacer(modifier = Modifier.width(8.dp))
                 TextButton(
                     onClick = {
-                        val min = minText.toDoubleOrNull()
-                        val max = maxText.toDoubleOrNull()
+                        val min = Currencies.parseBigDecimal(minText)?.toDouble()
+                        val max = Currencies.parseBigDecimal(maxText)?.toDouble()
                         onApply(cat, accId, min, max)
                     }
                 ) {

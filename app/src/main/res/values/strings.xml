@@ -147,10 +147,29 @@
     <string name="sign_in_with_passcode">Connexion avec code d\'accès</string>
     <string name="switch_user">Changer d\'utilisateur</string>
     <string name="admin_design_spec_title">Détails &amp; Design de l\'App (.txt)</string>
-    <string name="admin_design_spec_sub">410bala@gmail.com • Mise à jour automatique</string>
+    <string name="admin_design_spec_sub">Admin • Mise à jour automatique</string>
     <string name="admin_design_spec_view">Voir .txt</string>
     <string name="admin_design_spec_share">Partager .txt</string>
     <string name="admin_design_spec_copied">Spécification .txt copiée dans le presse-papiers</string>
+    <string name="admin_include_sensitive_ids">Inclure IDs sensibles (DB &amp; E-mails)</string>
+    <string name="twt_visibility_title">Visibilité TWT</string>
+    <string name="twt_visibility_sub">Requiert Biométrie ou PIN à l\'activation</string>
+    <string name="twt_unlock_title">Accès Privé TWT</string>
+    <string name="twt_unlock_sub">Vérification biométrique ou PIN à 4 chiffres requise</string>
+    <string name="twt_unlock_confirm">Déverrouiller</string>
+    <string name="twt_setup_pin_notice">Créez un code PIN à 4 chiffres pour protéger TWT (le verrouillage général reste désactivé).</string>
+    <string name="twt_private_badge">PRIVÉ</string>
+    <string name="fx_mode_toggle">Mode FX / Transfert de Devise ($ → CFA)</string>
+    <string name="fx_mode_sub">Déduit USD + Frais et crédite le net en CFA</string>
+    <string name="fx_amount_sent_usd">Montant envoyé ($ USD)</string>
+    <string name="fx_fee_usd">Frais de transfert ($ USD)</string>
+    <string name="fx_exchange_rate">Taux de change (1 USD → CFA)</string>
+    <string name="fx_source_usd_account">Compte source USD ($)</string>
+    <string name="fx_dest_cfa_account">Compte destination CFA</string>
+    <string name="fx_net_received_cfa">Net reçu (CFA)</string>
+    <string name="fx_total_deducted_usd">Total débité ($ USD)</string>
+    <string name="family_city_filters">Filtres Famille &amp; Villes</string>
+    <string name="filtered_cfa_total">Total filtré (CFA)</string>
 
     <!-- UI Themes -->
     <string name="theme_selection">Thème Cuir Artisanal</string>

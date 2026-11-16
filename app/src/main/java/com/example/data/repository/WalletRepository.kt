@@ -5,19 +5,32 @@ import com.example.data.local.WalletDao
 import com.example.data.model.AccountEntity
 import com.example.data.model.AccountType
 import com.example.data.model.ContactEntity
+import com.example.data.model.Currencies
 import com.example.data.model.RecurringTransactionEntity
+import com.example.data.model.SeedAccountIds
 import com.example.data.model.TransactionEntity
 import com.example.data.model.TransactionType
 import com.example.data.model.TwtAccountHelper
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+
+data class RemittanceFxResult(
+    val usdDeductionTx: TransactionEntity,
+    val cfaCreditTx: TransactionEntity,
+    val totalUsdDeducted: BigDecimal,
+    val netCfaReceived: BigDecimal
+)
 
 class WalletRepository(
     private val walletDao: WalletDao,
@@ -89,56 +102,131 @@ class WalletRepository(
         persistCustomCategories(merged)
     }
 
-    suspend fun getAccountsList(): List<AccountEntity> = walletDao.getAccountsList()
-    suspend fun getTransactionsList(): List<TransactionEntity> = walletDao.getTransactionsList()
-    suspend fun getContactsList(): List<ContactEntity> = walletDao.getContactsList()
-    suspend fun getRecurringTransactionsList(): List<RecurringTransactionEntity> = walletDao.getRecurringTransactionsList()
-
-    /**
-     * Migrates legacy TWT names ("Compte TWT", "Compte TWT 2026 FCFA", etc.) to dynamic "TWT [Year]"
-     * with strict USD ($) currency and strips "FCFA" from any non-TWT account currency codes.
-     */
-    suspend fun normalizeAccountsOnStartup() {
-        val existing = walletDao.getAccountsList()
-        var hasTwt = false
-        for (acc in existing) {
-            val normalized = TwtAccountHelper.normalizeTwtAccount(acc)
-            if (TwtAccountHelper.isTwtAccount(normalized)) {
-                hasTwt = true
-            }
-            if (normalized != acc) {
-                walletDao.updateAccount(normalized.copy(updatedAt = System.currentTimeMillis()))
-            }
-        }
-        if (!hasTwt && existing.isNotEmpty()) {
-            walletDao.insertAccount(
-                AccountEntity(
-                    name = TwtAccountHelper.currentTwtAccountName(),
-                    type = AccountType.SAVINGS,
-                    balance = 0.0,
-                    currencyCode = "USD",
-                    emojiAvatar = "🪙",
-                    sortOrder = 5,
-                    updatedAt = System.currentTimeMillis()
-                )
-            )
-        }
+    suspend fun getAccountsList(): List<AccountEntity> = withContext(Dispatchers.IO) {
+        walletDao.getAccountsList()
     }
 
-    suspend fun transferBetweenAccounts(fromAccountId: String, toAccountId: String, amount: Double, notes: String) {
-        val now = System.currentTimeMillis()
-        val fromAcc = walletDao.getAccountById(fromAccountId) ?: return
-        val toAcc = walletDao.getAccountById(toAccountId) ?: return
+    suspend fun getTransactionsList(): List<TransactionEntity> = withContext(Dispatchers.IO) {
+        walletDao.getTransactionsList()
+    }
 
-        walletDao.updateAccount(fromAcc.copy(balance = fromAcc.balance - amount, updatedAt = now))
-        walletDao.updateAccount(toAcc.copy(balance = toAcc.balance + amount, updatedAt = now))
+    suspend fun getContactsList(): List<ContactEntity> = withContext(Dispatchers.IO) {
+        walletDao.getContactsList()
+    }
+
+    suspend fun getRecurringTransactionsList(): List<RecurringTransactionEntity> = withContext(Dispatchers.IO) {
+        walletDao.getRecurringTransactionsList()
+    }
+
+    suspend fun getDeletedAccountsList(): List<AccountEntity> = withContext(Dispatchers.IO) {
+        walletDao.getDeletedAccountsList()
+    }
+
+    suspend fun hardDeleteAccount(id: String) = withContext(Dispatchers.IO) {
+        walletDao.hardDeleteAccount(id)
+    }
+
+    /**
+     * Migrates legacy TWT names, normalizes currencies, deduplicates default seed accounts with 0.00 balance
+     * sharing the same name and scope, and ensures exactly 1 canonical record per default seed account (6 total).
+     */
+    suspend fun normalizeAccountsOnStartup() = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val existing = walletDao.getAccountsList()
+
+        // 1. Normalize names & currency codes (e.g. Compte TWT 2026 FCFA -> TWT 2026 USD, strip FCFA -> CFA)
+        for (acc in existing) {
+            val normalized = TwtAccountHelper.normalizeTwtAccount(acc)
+            if (normalized != acc) {
+                walletDao.updateAccount(normalized.copy(updatedAt = now))
+            }
+        }
+
+        // 2. Migrate/deduplicate default seed accounts & delete 0.00 duplicates sharing name & scope
+        val seeds = SeedAccountIds.defaultSeedAccounts(now)
+        val afterNorm = walletDao.getAccountsList()
+
+        // Group by (normalized name, TWT scope)
+        val grouped = afterNorm.groupBy { acc ->
+            acc.name.trim().lowercase() to TwtAccountHelper.isTwtAccount(acc)
+        }
+
+        for ((_, group) in grouped) {
+            if (group.size <= 1) continue
+
+            // Prefer deterministic seed_* ID; if another has non-zero balance, prefer non-zero or preserve into seed
+            val seedMatch = group.firstOrNull { it.id in SeedAccountIds.ALL_IDS }
+            val nonZero = group.firstOrNull {
+                Currencies.toMoneyBigDecimal(it.balance).compareTo(BigDecimal.ZERO) != 0
+            }
+            val keeper = when {
+                seedMatch != null && (nonZero == null || nonZero.id == seedMatch.id) -> seedMatch
+                nonZero != null -> nonZero
+                else -> group.maxByOrNull { it.updatedAt } ?: group.first()
+            }
+
+            for (other in group) {
+                if (other.id == keeper.id) continue
+                val otherBal = Currencies.toMoneyBigDecimal(other.balance)
+                if (otherBal.compareTo(BigDecimal.ZERO) == 0) {
+                    walletDao.reassignTransactionsAccount(other.id, keeper.id, now)
+                    walletDao.reassignRecurringAccount(other.id, keeper.id, now)
+                    walletDao.markAccountDeleted(other.id, now)
+                }
+            }
+        }
+
+        // 3. One-time migration: align legacy random-UUID default accounts to deterministic seed_* IDs
+        val cleanupKey = "duplicate_seed_cleanup_v1"
+        val currentAccounts = walletDao.getAccountsList()
+        for (seed in seeds) {
+            val seedScope = TwtAccountHelper.isTwtAccount(seed)
+            val matching = currentAccounts.filter { acc ->
+                acc.id == seed.id ||
+                    (acc.name.trim().equals(seed.name.trim(), ignoreCase = true) &&
+                        TwtAccountHelper.isTwtAccount(acc) == seedScope)
+            }
+            if (matching.isEmpty()) {
+                walletDao.insertSeedAccount(seed)
+            } else if (matching.none { it.id == seed.id } && prefs?.getBoolean(cleanupKey, false) != true) {
+                val legacy = matching.firstOrNull {
+                    Currencies.toMoneyBigDecimal(it.balance).compareTo(BigDecimal.ZERO) != 0
+                } ?: matching.first()
+                val migratedSeed = seed.copy(
+                    balance = Currencies.toMoneyBigDecimal(legacy.balance).toDouble(),
+                    updatedAt = maxOf(legacy.updatedAt, now)
+                )
+                walletDao.insertSeedAccount(migratedSeed)
+                for (oldAcc in matching) {
+                    walletDao.reassignTransactionsAccount(oldAcc.id, migratedSeed.id, now)
+                    walletDao.reassignRecurringAccount(oldAcc.id, migratedSeed.id, now)
+                    walletDao.markAccountDeleted(oldAcc.id, now)
+                }
+            }
+        }
+
+        prefs?.edit()?.putBoolean(cleanupKey, true)?.apply()
+    }
+
+    suspend fun transferBetweenAccounts(fromAccountId: String, toAccountId: String, amount: Double, notes: String) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis()
+        val fromAcc = walletDao.getAccountById(fromAccountId) ?: return@withContext
+        val toAcc = walletDao.getAccountById(toAccountId) ?: return@withContext
+        val amountBd = Currencies.toMoneyBigDecimal(amount)
+        if (amountBd.compareTo(BigDecimal.ZERO) <= 0) return@withContext
+
+        val newFromBal = Currencies.toMoneyBigDecimal(fromAcc.balance).subtract(amountBd).setScale(2, RoundingMode.HALF_UP)
+        val newToBal = Currencies.toMoneyBigDecimal(toAcc.balance).add(amountBd).setScale(2, RoundingMode.HALF_UP)
+
+        walletDao.updateAccount(fromAcc.copy(balance = newFromBal.toDouble(), updatedAt = now))
+        walletDao.updateAccount(toAcc.copy(balance = newToBal.toDouble(), updatedAt = now))
 
         val txOut = TransactionEntity(
             accountId = fromAccountId,
             type = TransactionType.EXPENSE,
-            amount = amount,
+            amount = amountBd.toDouble(),
             payee = "Transfert vers ${toAcc.name}",
-            category = "Transfert",
+            category = "Other",
             notes = notes,
             timestamp = now,
             updatedAt = now
@@ -146,9 +234,9 @@ class WalletRepository(
         val txIn = TransactionEntity(
             accountId = toAccountId,
             type = TransactionType.INCOME,
-            amount = amount,
+            amount = amountBd.toDouble(),
             payee = "Transfert depuis ${fromAcc.name}",
-            category = "Transfert",
+            category = "Other",
             notes = notes,
             timestamp = now,
             updatedAt = now
@@ -164,16 +252,19 @@ class WalletRepository(
         destinationCountry: String,
         channel: String,
         notes: String
-    ) {
+    ) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val acc = walletDao.getAccountById(accountId) ?: return
+        val acc = walletDao.getAccountById(accountId) ?: return@withContext
+        val amountBd = Currencies.toMoneyBigDecimal(amount)
+        if (amountBd.compareTo(BigDecimal.ZERO) <= 0) return@withContext
 
-        walletDao.updateAccount(acc.copy(balance = acc.balance - amount, updatedAt = now))
+        val newBal = Currencies.toMoneyBigDecimal(acc.balance).subtract(amountBd).setScale(2, RoundingMode.HALF_UP)
+        walletDao.updateAccount(acc.copy(balance = newBal.toDouble(), updatedAt = now))
 
         val tx = TransactionEntity(
             accountId = accountId,
             type = TransactionType.EXPENSE,
-            amount = amount,
+            amount = amountBd.toDouble(),
             payee = recipientName,
             category = destinationCountry,
             notes = "$channel -> $destinationCountry: $notes",
@@ -192,68 +283,170 @@ class WalletRepository(
         )
     }
 
-    suspend fun addAccount(account: AccountEntity) {
-        val normalized = TwtAccountHelper.normalizeTwtAccount(account)
-        walletDao.insertAccount(normalized.copy(updatedAt = System.currentTimeMillis()))
+    suspend fun executeRemittanceFxTransaction(
+        usdAccountId: String,
+        cfaAccountId: String,
+        amountSentUsd: BigDecimal,
+        feeUsd: BigDecimal,
+        exchangeRateUsdToCfa: BigDecimal,
+        payee: String,
+        category: String,
+        timestamp: Long,
+        notes: String
+    ): RemittanceFxResult? = withContext(Dispatchers.IO) {
+        if (amountSentUsd.compareTo(BigDecimal.ZERO) <= 0 ||
+            feeUsd.compareTo(BigDecimal.ZERO) < 0 ||
+            exchangeRateUsdToCfa.compareTo(BigDecimal.ZERO) <= 0
+        ) {
+            return@withContext null
+        }
+        val usdAcc = walletDao.getAccountById(usdAccountId) ?: return@withContext null
+        val cfaAcc = walletDao.getAccountById(cfaAccountId) ?: return@withContext null
+
+        val now = System.currentTimeMillis()
+        val totalUsdDeducted = Currencies.computeTotalUsdDeduction(amountSentUsd, feeUsd)
+        val netCfaReceived = Currencies.computeNetCfaFromFx(amountSentUsd, exchangeRateUsdToCfa)
+
+        val fxNoteDetail = buildString {
+            append("FX Remittance: ")
+            append(Currencies.format(amountSentUsd, "USD"))
+            if (feeUsd.compareTo(BigDecimal.ZERO) > 0) {
+                append(" + Fee ")
+                append(Currencies.format(feeUsd, "USD"))
+            }
+            append(" @ 1 USD = ")
+            append(exchangeRateUsdToCfa.stripTrailingZeros().toPlainString())
+            append(" CFA -> ")
+            append(Currencies.format(netCfaReceived, "CFA"))
+            if (notes.isNotBlank()) {
+                append(" | ")
+                append(notes.trim())
+            }
+        }
+
+        val usdTx = TransactionEntity(
+            accountId = usdAccountId,
+            type = TransactionType.EXPENSE,
+            amount = totalUsdDeducted.toDouble(),
+            payee = payee.trim(),
+            category = category,
+            notes = fxNoteDetail,
+            timestamp = timestamp,
+            updatedAt = now
+        )
+
+        val cfaTx = TransactionEntity(
+            accountId = cfaAccountId,
+            type = TransactionType.INCOME,
+            amount = netCfaReceived.toDouble(),
+            payee = payee.trim(),
+            category = category,
+            notes = fxNoteDetail,
+            timestamp = timestamp,
+            updatedAt = now
+        )
+
+        val newUsdBalance = Currencies.toMoneyBigDecimal(usdAcc.balance)
+            .subtract(totalUsdDeducted)
+            .setScale(2, RoundingMode.HALF_UP)
+        val newCfaBalance = Currencies.toMoneyBigDecimal(cfaAcc.balance)
+            .add(netCfaReceived)
+            .setScale(2, RoundingMode.HALF_UP)
+
+        walletDao.insertTransaction(usdTx)
+        walletDao.insertTransaction(cfaTx)
+        walletDao.updateAccount(usdAcc.copy(balance = newUsdBalance.toDouble(), updatedAt = now))
+        walletDao.updateAccount(cfaAcc.copy(balance = newCfaBalance.toDouble(), updatedAt = now))
+
+        RemittanceFxResult(
+            usdDeductionTx = usdTx,
+            cfaCreditTx = cfaTx,
+            totalUsdDeducted = totalUsdDeducted,
+            netCfaReceived = netCfaReceived
+        )
     }
 
-    suspend fun updateAccount(account: AccountEntity) {
+    suspend fun addAccount(account: AccountEntity) = withContext(Dispatchers.IO) {
         val normalized = TwtAccountHelper.normalizeTwtAccount(account)
-        walletDao.updateAccount(normalized.copy(updatedAt = System.currentTimeMillis()))
+        val roundedBal = Currencies.toMoneyBigDecimal(normalized.balance).toDouble()
+        walletDao.insertAccount(normalized.copy(balance = roundedBal, updatedAt = System.currentTimeMillis()))
     }
 
-    suspend fun deleteAccount(accountId: String) {
+    suspend fun updateAccount(account: AccountEntity) = withContext(Dispatchers.IO) {
+        val normalized = TwtAccountHelper.normalizeTwtAccount(account)
+        val roundedBal = Currencies.toMoneyBigDecimal(normalized.balance).toDouble()
+        walletDao.updateAccount(normalized.copy(balance = roundedBal, updatedAt = System.currentTimeMillis()))
+    }
+
+    suspend fun deleteAccount(accountId: String) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         walletDao.markAccountDeleted(accountId, now)
         walletDao.markTransactionsDeletedForAccount(accountId, now)
     }
 
-    suspend fun addTransaction(transaction: TransactionEntity) {
+    suspend fun addTransaction(transaction: TransactionEntity) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        val txWithTime = transaction.copy(updatedAt = now)
+        val amountBd = Currencies.toMoneyBigDecimal(transaction.amount)
+        val txWithTime = transaction.copy(amount = amountBd.toDouble(), updatedAt = now)
         walletDao.insertTransaction(txWithTime)
 
         walletDao.getAccountById(transaction.accountId)?.let { acc ->
-            val delta = if (transaction.type == TransactionType.INCOME) transaction.amount else -transaction.amount
+            val currentBal = Currencies.toMoneyBigDecimal(acc.balance)
+            val newBal = if (transaction.type == TransactionType.INCOME) {
+                currentBal.add(amountBd)
+            } else {
+                currentBal.subtract(amountBd)
+            }.setScale(2, RoundingMode.HALF_UP)
             walletDao.updateAccount(
                 acc.copy(
-                    balance = acc.balance + delta,
+                    balance = newBal.toDouble(),
                     updatedAt = now
                 )
             )
         }
     }
 
-    suspend fun updateTransaction(oldTx: TransactionEntity, newTx: TransactionEntity) {
+    suspend fun updateTransaction(oldTx: TransactionEntity, newTx: TransactionEntity) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        walletDao.updateTransaction(newTx.copy(updatedAt = now))
+        val oldAmountBd = Currencies.toMoneyBigDecimal(oldTx.amount)
+        val newAmountBd = Currencies.toMoneyBigDecimal(newTx.amount)
+        walletDao.updateTransaction(newTx.copy(amount = newAmountBd.toDouble(), updatedAt = now))
+
+        val oldDelta = if (oldTx.type == TransactionType.INCOME) oldAmountBd else oldAmountBd.negate()
+        val newDelta = if (newTx.type == TransactionType.INCOME) newAmountBd else newAmountBd.negate()
 
         if (oldTx.accountId == newTx.accountId) {
             walletDao.getAccountById(newTx.accountId)?.let { acc ->
-                val oldDelta = if (oldTx.type == TransactionType.INCOME) oldTx.amount else -oldTx.amount
-                val newDelta = if (newTx.type == TransactionType.INCOME) newTx.amount else -newTx.amount
+                val updatedBal = Currencies.toMoneyBigDecimal(acc.balance)
+                    .subtract(oldDelta)
+                    .add(newDelta)
+                    .setScale(2, RoundingMode.HALF_UP)
                 walletDao.updateAccount(
                     acc.copy(
-                        balance = acc.balance - oldDelta + newDelta,
+                        balance = updatedBal.toDouble(),
                         updatedAt = now
                     )
                 )
             }
         } else {
             walletDao.getAccountById(oldTx.accountId)?.let { oldAcc ->
-                val oldDelta = if (oldTx.type == TransactionType.INCOME) oldTx.amount else -oldTx.amount
+                val updatedOldBal = Currencies.toMoneyBigDecimal(oldAcc.balance)
+                    .subtract(oldDelta)
+                    .setScale(2, RoundingMode.HALF_UP)
                 walletDao.updateAccount(
                     oldAcc.copy(
-                        balance = oldAcc.balance - oldDelta,
+                        balance = updatedOldBal.toDouble(),
                         updatedAt = now
                     )
                 )
             }
             walletDao.getAccountById(newTx.accountId)?.let { newAcc ->
-                val newDelta = if (newTx.type == TransactionType.INCOME) newTx.amount else -newTx.amount
+                val updatedNewBal = Currencies.toMoneyBigDecimal(newAcc.balance)
+                    .add(newDelta)
+                    .setScale(2, RoundingMode.HALF_UP)
                 walletDao.updateAccount(
                     newAcc.copy(
-                        balance = newAcc.balance + newDelta,
+                        balance = updatedNewBal.toDouble(),
                         updatedAt = now
                     )
                 )
@@ -261,57 +454,65 @@ class WalletRepository(
         }
     }
 
-    suspend fun deleteTransaction(transaction: TransactionEntity) {
+    suspend fun deleteTransaction(transaction: TransactionEntity) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         walletDao.markTransactionDeleted(transaction.id, now)
 
+        val amountBd = Currencies.toMoneyBigDecimal(transaction.amount)
         walletDao.getAccountById(transaction.accountId)?.let { acc ->
-            val delta = if (transaction.type == TransactionType.INCOME) -transaction.amount else transaction.amount
+            val currentBal = Currencies.toMoneyBigDecimal(acc.balance)
+            val updatedBal = if (transaction.type == TransactionType.INCOME) {
+                currentBal.subtract(amountBd)
+            } else {
+                currentBal.add(amountBd)
+            }.setScale(2, RoundingMode.HALF_UP)
             walletDao.updateAccount(
                 acc.copy(
-                    balance = acc.balance + delta,
+                    balance = updatedBal.toDouble(),
                     updatedAt = now
                 )
             )
         }
     }
 
-    suspend fun clearAllTransactions() {
+    suspend fun clearAllTransactions() = withContext(Dispatchers.IO) {
         walletDao.clearTransactions()
         walletDao.clearRecurringTransactions()
     }
 
-    suspend fun getDeletedTransactionsList(): List<TransactionEntity> {
-        return walletDao.getDeletedTransactionsList()
+    suspend fun getDeletedTransactionsList(): List<TransactionEntity> = withContext(Dispatchers.IO) {
+        walletDao.getDeletedTransactionsList()
     }
 
-    suspend fun hardDeleteTransaction(id: String) {
+    suspend fun hardDeleteTransaction(id: String) = withContext(Dispatchers.IO) {
         walletDao.hardDeleteTransaction(id)
     }
 
     // Recurring Transaction Operations
-    suspend fun addRecurringTransaction(recurring: RecurringTransactionEntity) {
+    suspend fun addRecurringTransaction(recurring: RecurringTransactionEntity) = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
-        walletDao.insertRecurringTransaction(recurring.copy(updatedAt = now))
+        val amountBd = Currencies.toMoneyBigDecimal(recurring.amount)
+        walletDao.insertRecurringTransaction(recurring.copy(amount = amountBd.toDouble(), updatedAt = now))
     }
 
-    suspend fun updateRecurringTransaction(recurring: RecurringTransactionEntity) {
-        walletDao.updateRecurringTransaction(recurring.copy(updatedAt = System.currentTimeMillis()))
+    suspend fun updateRecurringTransaction(recurring: RecurringTransactionEntity) = withContext(Dispatchers.IO) {
+        val amountBd = Currencies.toMoneyBigDecimal(recurring.amount)
+        walletDao.updateRecurringTransaction(recurring.copy(amount = amountBd.toDouble(), updatedAt = System.currentTimeMillis()))
     }
 
-    suspend fun deleteRecurringTransaction(id: String) {
+    suspend fun deleteRecurringTransaction(id: String) = withContext(Dispatchers.IO) {
         walletDao.markRecurringTransactionDeleted(id, System.currentTimeMillis())
     }
 
-    suspend fun toggleRecurringTransactionActive(id: String, isActive: Boolean) {
+    suspend fun toggleRecurringTransactionActive(id: String, isActive: Boolean) = withContext(Dispatchers.IO) {
         val list = walletDao.getRecurringTransactionsList()
-        val item = list.firstOrNull { it.id == id } ?: return
+        val item = list.firstOrNull { it.id == id } ?: return@withContext
         walletDao.updateRecurringTransaction(item.copy(isActive = isActive, updatedAt = System.currentTimeMillis()))
     }
 
-    suspend fun executeRecurringTransactionNow(recurringId: String): TransactionEntity? {
+    suspend fun executeRecurringTransactionNow(recurringId: String): TransactionEntity? = withContext(Dispatchers.IO) {
         val list = walletDao.getRecurringTransactionsList()
-        val item = list.firstOrNull { it.id == recurringId } ?: return null
+        val item = list.firstOrNull { it.id == recurringId } ?: return@withContext null
         val now = System.currentTimeMillis()
 
         val generatedTx = TransactionEntity(
@@ -334,10 +535,10 @@ class WalletRepository(
                 updatedAt = now
             )
         )
-        return generatedTx
+        generatedTx
     }
 
-    suspend fun processDueRecurringTransactions(): Int {
+    suspend fun processDueRecurringTransactions(): Int = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         val activeRecurring = walletDao.getActiveRecurringTransactions()
         var generatedCount = 0
@@ -372,18 +573,31 @@ class WalletRepository(
                 )
             }
         }
-        return generatedCount
+        generatedCount
     }
 
     suspend fun mergeRemoteData(
         remoteAccounts: List<AccountEntity>,
         remoteTransactions: List<TransactionEntity>
-    ): Pair<Int, Int> {
+    ): Pair<Int, Int> = withContext(Dispatchers.IO) {
         val localAccounts = walletDao.getAccountsList().associateBy { it.id }
+        val deletedAccountIds = walletDao.getDeletedAccountsList().map { it.id }.toSet()
         val accountsToUpsert = mutableListOf<AccountEntity>()
 
         for (remote in remoteAccounts) {
+            if (remote.id in deletedAccountIds) continue
             val normalized = TwtAccountHelper.normalizeTwtAccount(remote)
+            // Prevent re-inserting remote 0.00 duplicates when a local account with same name + scope already exists
+            val remoteBal = Currencies.toMoneyBigDecimal(normalized.balance)
+            val sameNameScopeLocal = localAccounts.values.firstOrNull {
+                it.id != normalized.id &&
+                    it.name.trim().equals(normalized.name.trim(), ignoreCase = true) &&
+                    TwtAccountHelper.isTwtAccount(it) == TwtAccountHelper.isTwtAccount(normalized)
+            }
+            if (sameNameScopeLocal != null && remoteBal.compareTo(BigDecimal.ZERO) == 0) {
+                continue
+            }
+
             val local = localAccounts[normalized.id]
             if (local == null || normalized.updatedAt > local.updatedAt) {
                 accountsToUpsert.add(normalized)
@@ -408,13 +622,14 @@ class WalletRepository(
             walletDao.upsertTransactions(transactionsToUpsert)
         }
 
-        return Pair(accountsToUpsert.size, transactionsToUpsert.size)
+        Pair(accountsToUpsert.size, transactionsToUpsert.size)
     }
 
-    suspend fun exportToCsv(includeTwt: Boolean = true): String {
-        val allAccounts = walletDao.getAccountsList().filter { includeTwt || !TwtAccountHelper.isTwtAccount(it) }
+    suspend fun exportToCsv(includeTwt: Boolean = true): String = withContext(Dispatchers.IO) {
+        val allAccountsRaw = walletDao.getAccountsList()
+        val allAccounts = allAccountsRaw.filter { includeTwt || !TwtAccountHelper.isTwtAccount(it) }
         val accounts = allAccounts.associateBy { it.id }
-        val twtIds = walletDao.getAccountsList().filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
+        val twtIds = allAccountsRaw.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
         val transactions = walletDao.getTransactionsList().filter { includeTwt || it.accountId !in twtIds }
         val sdf = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
 
@@ -428,14 +643,15 @@ class WalletRepository(
             val cat = tx.category.replace("\"", "\"\"")
             val notes = tx.notes.replace("\"", "\"\"")
             val dateStr = sdf.format(Date(tx.timestamp))
-            val cur = com.example.data.model.Currencies.effectiveCurrencyCode(acc, "CFA")
+            val cur = Currencies.effectiveCurrencyCode(acc, "CFA")
+            val amt = Currencies.toMoneyBigDecimal(tx.amount).toPlainString()
 
-            sb.append("\"$dateStr\",\"$accName\",\"$payee\",\"$cat\",\"${tx.type.name}\",${tx.amount},\"$cur\",\"$notes\"\n")
+            sb.append("\"$dateStr\",\"$accName\",\"$payee\",\"$cat\",\"${tx.type.name}\",$amt,\"$cur\",\"$notes\"\n")
         }
-        return sb.toString()
+        sb.toString()
     }
 
-    suspend fun exportToJson(includeTwt: Boolean = true): String {
+    suspend fun exportToJson(includeTwt: Boolean = true): String = withContext(Dispatchers.IO) {
         val allAccounts = walletDao.getAccountsList()
         val twtIds = allAccounts.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
         val accounts = allAccounts.filter { includeTwt || it.id !in twtIds }
@@ -455,8 +671,8 @@ class WalletRepository(
                 put("id", normalized.id)
                 put("name", normalized.name)
                 put("type", normalized.type.name)
-                put("balance", normalized.balance)
-                put("currencyCode", com.example.data.model.Currencies.effectiveCurrencyCode(normalized, "CFA"))
+                put("balance", Currencies.toMoneyBigDecimal(normalized.balance).toDouble())
+                put("currencyCode", Currencies.effectiveCurrencyCode(normalized, "CFA"))
                 put("emojiAvatar", normalized.emojiAvatar)
                 put("sortOrder", normalized.sortOrder)
                 put("updatedAt", normalized.updatedAt)
@@ -472,7 +688,7 @@ class WalletRepository(
                 put("id", tx.id)
                 put("accountId", tx.accountId)
                 put("type", tx.type.name)
-                put("amount", tx.amount)
+                put("amount", Currencies.toMoneyBigDecimal(tx.amount).toDouble())
                 put("payee", tx.payee)
                 put("category", tx.category)
                 put("timestamp", tx.timestamp)
@@ -505,10 +721,10 @@ class WalletRepository(
         }
         root.put("contacts", contactsArray)
 
-        return root.toString(2)
+        root.toString(2)
     }
 
-    suspend fun importFromJson(jsonString: String, includeTwt: Boolean = true): Pair<Int, Int> {
+    suspend fun importFromJson(jsonString: String, includeTwt: Boolean = true): Pair<Int, Int> = withContext(Dispatchers.IO) {
         val root = JSONObject(jsonString)
         val accArray = root.optJSONArray("accounts") ?: JSONArray()
         val txArray = root.optJSONArray("transactions") ?: JSONArray()
@@ -529,7 +745,7 @@ class WalletRepository(
                 id = accId,
                 name = rawName,
                 type = runCatching { AccountType.valueOf(obj.optString("type", "CUSTOM")) }.getOrDefault(AccountType.CUSTOM),
-                balance = obj.getDouble("balance"),
+                balance = Currencies.toMoneyBigDecimal(obj.getDouble("balance")).toDouble(),
                 currencyCode = obj.optString("currencyCode", "CFA"),
                 emojiAvatar = obj.optString("emojiAvatar", "💵"),
                 sortOrder = obj.optInt("sortOrder", 0),
@@ -549,7 +765,7 @@ class WalletRepository(
                     id = obj.getString("id"),
                     accountId = accId,
                     type = runCatching { TransactionType.valueOf(obj.optString("type", "EXPENSE")) }.getOrDefault(TransactionType.EXPENSE),
-                    amount = obj.getDouble("amount"),
+                    amount = Currencies.toMoneyBigDecimal(obj.getDouble("amount")).toDouble(),
                     payee = obj.getString("payee"),
                     category = obj.getString("category"),
                     timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
@@ -585,6 +801,6 @@ class WalletRepository(
             }
         }
 
-        return mergeRemoteData(parsedAccounts, parsedTransactions)
+        mergeRemoteData(parsedAccounts, parsedTransactions)
     }
 }

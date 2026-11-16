@@ -117,20 +117,26 @@ fun ExportImportDialog(
     }
 
     fun copyToClipboard(label: String, text: String) {
-        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip = ClipData.newPlainText(label, text)
-        clipboard.setPrimaryClip(clip)
-        Toast.makeText(context, "Copié dans le presse-papiers", Toast.LENGTH_SHORT).show()
+        try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clip = ClipData.newPlainText(label, text)
+            clipboard?.setPrimaryClip(clip)
+            Toast.makeText(context, "Copié dans le presse-papiers", Toast.LENGTH_SHORT).show()
+        } catch (_: Exception) { }
     }
 
     fun shareText(title: String, text: String) {
-        val sendIntent = Intent().apply {
-            action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_TEXT, text)
-            type = "text/plain"
-        }
-        val shareIntent = Intent.createChooser(sendIntent, title)
-        context.startActivity(shareIntent)
+        try {
+            val sendIntent = Intent().apply {
+                action = Intent.ACTION_SEND
+                putExtra(Intent.EXTRA_TEXT, text)
+                type = "text/plain"
+            }
+            val shareIntent = Intent.createChooser(sendIntent, title).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(shareIntent)
+        } catch (_: Exception) { }
     }
 
     val startOfThisMonth = remember {
@@ -435,9 +441,13 @@ fun ExportImportDialog(
                                 )
                                 if (file != null) {
                                     PdfReportExporter.sharePdf(context, file)
-                                    statusMessage = "Rapport PDF (${filteredForExport.size} lignes) généré !"
+                                    statusMessage = if (filteredForExport.isEmpty()) {
+                                        "Rapport PDF vide (0 transaction) généré !"
+                                    } else {
+                                        "Rapport PDF (${filteredForExport.size} lignes) généré !"
+                                    }
                                 } else {
-                                    statusMessage = "Aucune transaction correspondante pour ce filtre."
+                                    statusMessage = "Impossible de générer le fichier PDF."
                                 }
                             },
                             colors = ButtonDefaults.buttonColors(
@@ -455,12 +465,17 @@ fun ExportImportDialog(
                         OutlinedButton(
                             onClick = {
                                 scope.launch {
-                                    isProcessing = true
-                                    val csv = onExportCsv()
-                                    copyToClipboard("Balatec Ledger CSV", csv)
-                                    shareText("Balatec Wallet Ledger CSV", csv)
-                                    statusMessage = "Grand Livre CSV exporté et prêt à partager !"
-                                    isProcessing = false
+                                    try {
+                                        isProcessing = true
+                                        val csv = onExportCsv()
+                                        copyToClipboard("Balatec Ledger CSV", csv)
+                                        shareText("Balatec Wallet Ledger CSV", csv)
+                                        statusMessage = "Grand Livre CSV exporté (${transactions.size} ligne(s)) !"
+                                    } catch (_: Exception) {
+                                        statusMessage = "Échec de l'exportation CSV."
+                                    } finally {
+                                        isProcessing = false
+                                    }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -472,11 +487,16 @@ fun ExportImportDialog(
                         OutlinedButton(
                             onClick = {
                                 scope.launch {
-                                    isProcessing = true
-                                    val json = onExportJson()
-                                    copyToClipboard("Balatec Wallet Backup JSON", json)
-                                    statusMessage = "Sauvegarde JSON générée et copiée !"
-                                    isProcessing = false
+                                    try {
+                                        isProcessing = true
+                                        val json = onExportJson()
+                                        copyToClipboard("Balatec Wallet Backup JSON", json)
+                                        statusMessage = "Sauvegarde JSON générée (${transactions.size} transaction(s)) et copiée !"
+                                    } catch (_: Exception) {
+                                        statusMessage = "Échec de l'exportation JSON."
+                                    } finally {
+                                        isProcessing = false
+                                    }
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().height(48.dp),

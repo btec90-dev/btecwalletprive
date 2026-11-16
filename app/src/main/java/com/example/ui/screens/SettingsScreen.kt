@@ -83,13 +83,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import com.example.R
 import com.example.data.model.Currencies
 import com.example.data.sync.SyncState
 import com.example.data.sync.SyncStatus
 import com.example.security.AccessSession
+import com.example.security.SecurityManager
 import com.example.security.UserRole
 import com.example.ui.components.ArtisanCard
+import com.example.ui.components.TwtSecurityChallengeDialog
 import com.example.ui.theme.ArtisanThemeConfig
 import com.example.ui.theme.ArtisanThemes
 import com.example.ui.theme.LocalArtisanTheme
@@ -107,8 +110,12 @@ fun SettingsScreen(
     syncState: SyncState,
     accessSession: AccessSession = AccessSession(),
     adminDesignSpecText: String = "",
+    isTwtVisibleEnabled: Boolean = true,
+    includeSensitiveIdsInSpec: Boolean = false,
     isPinEnabled: Boolean,
     isBiometricEnabled: Boolean,
+    activity: FragmentActivity? = null,
+    securityManager: SecurityManager? = null,
     onThemeSelected: (ArtisanThemeConfig) -> Unit,
     onCurrencySelected: (String) -> Unit,
     onLanguageSelected: (String) -> Unit,
@@ -116,6 +123,8 @@ fun SettingsScreen(
     onToggleSync: (Boolean) -> Unit,
     onSyncNow: () -> Unit,
     onSignOut: () -> Unit,
+    onToggleTwtVisibility: (Boolean) -> Unit = {},
+    onToggleIncludeSensitiveIds: (Boolean) -> Unit = {},
     onTogglePin: (Boolean) -> Unit,
     onSetPin: (String) -> Boolean,
     onToggleBiometric: (Boolean) -> Unit,
@@ -127,6 +136,7 @@ fun SettingsScreen(
     var showCurrencyDialog by remember { mutableStateOf(false) }
     var showPinSetupDialog by remember { mutableStateOf(false) }
     var showAdminSpecDialog by remember { mutableStateOf(false) }
+    var showTwtVisibilityAuthDialog by remember { mutableStateOf(false) }
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
 
     LazyColumn(
@@ -266,7 +276,73 @@ fun SettingsScreen(
             }
         }
 
-        // 1b. Primary Admin Only (410bala@gmail.com): Live App Contents & Design (.txt)
+        // 1b. Primary Admin Only (410bala@gmail.com): TWT 2026 Visibility Toggle (Biometric / PIN gated on ON)
+        if (accessSession.isAdminTwtVisible) {
+            item {
+                ArtisanCard(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("settings_twt_visibility_card"),
+                    containerColor = theme.surfaceColor,
+                    border = BorderStroke(1.dp, theme.metallicAccent.copy(alpha = 0.65f)),
+                    elevation = 2.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(18.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = theme.metallicAccent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                            Column {
+                                Text(
+                                    text = stringResource(R.string.twt_visibility_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = theme.primaryColor
+                                )
+                                Text(
+                                    text = stringResource(R.string.twt_visibility_sub),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = theme.secondaryTextColor
+                                )
+                            }
+                        }
+
+                        Switch(
+                            checked = isTwtVisibleEnabled,
+                            onCheckedChange = { wantVisible ->
+                                if (!wantVisible) {
+                                    onToggleTwtVisibility(false)
+                                } else if (activity != null && securityManager != null) {
+                                    showTwtVisibilityAuthDialog = true
+                                } else {
+                                    onToggleTwtVisibility(true)
+                                }
+                            },
+                            modifier = Modifier.testTag("switch_twt_visibility"),
+                            colors = SwitchDefaults.colors(
+                                checkedThumbColor = theme.surfaceColor,
+                                checkedTrackColor = theme.primaryColor
+                            )
+                        )
+                    }
+                }
+            }
+        }
+
+        // 1c. Primary Admin Only (410bala@gmail.com): Live App Contents & Design (.txt)
         if (AppDesignSpecBuilder.isEligibleForAdminSpec(accessSession) && adminDesignSpecText.isNotBlank()) {
             item {
                 ArtisanCard(
@@ -338,6 +414,30 @@ fun SettingsScreen(
                             )
                         }
 
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = stringResource(R.string.admin_include_sensitive_ids),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = theme.primaryColor,
+                                fontWeight = FontWeight.SemiBold,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Switch(
+                                checked = includeSensitiveIdsInSpec,
+                                onCheckedChange = onToggleIncludeSensitiveIds,
+                                modifier = Modifier.testTag("switch_admin_sensitive_ids"),
+                                colors = SwitchDefaults.colors(
+                                    checkedThumbColor = theme.surfaceColor,
+                                    checkedTrackColor = theme.primaryColor
+                                )
+                            )
+                        }
+
                         Spacer(modifier = Modifier.height(12.dp))
                         Row(
                             modifier = Modifier.fillMaxWidth(),
@@ -368,11 +468,13 @@ fun SettingsScreen(
 
                             OutlinedButton(
                                 onClick = {
-                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    clipboard.setPrimaryClip(
-                                        ClipData.newPlainText(AppDesignSpecBuilder.ADMIN_SPEC_FILENAME, adminDesignSpecText)
-                                    )
-                                    Toast.makeText(context, context.getString(R.string.admin_design_spec_copied), Toast.LENGTH_SHORT).show()
+                                    try {
+                                        val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        clipboard.setPrimaryClip(
+                                            ClipData.newPlainText(AppDesignSpecBuilder.ADMIN_SPEC_FILENAME, adminDesignSpecText)
+                                        )
+                                        Toast.makeText(context, context.getString(R.string.admin_design_spec_copied), Toast.LENGTH_SHORT).show()
+                                    } catch (_: Exception) { }
                                 },
                                 modifier = Modifier
                                     .height(48.dp)
@@ -1020,16 +1122,35 @@ fun SettingsScreen(
         )
     }
 
+    // TWT Visibility Security Challenge Dialog
+    if (showTwtVisibilityAuthDialog && activity != null && securityManager != null) {
+        TwtSecurityChallengeDialog(
+            activity = activity,
+            securityManager = securityManager,
+            title = stringResource(R.string.twt_unlock_title),
+            subtitle = stringResource(R.string.twt_unlock_sub),
+            onAuthenticated = {
+                showTwtVisibilityAuthDialog = false
+                onToggleTwtVisibility(true)
+            },
+            onDismiss = { showTwtVisibilityAuthDialog = false }
+        )
+    }
+
     // Admin App Details & Design (.txt) Live Viewer Dialog
     if (showAdminSpecDialog && adminDesignSpecText.isNotBlank()) {
         AdminDesignSpecDialog(
             specText = adminDesignSpecText,
+            includeSensitiveIds = includeSensitiveIdsInSpec,
+            onToggleIncludeSensitiveIds = onToggleIncludeSensitiveIds,
             onCopy = {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                clipboard.setPrimaryClip(
-                    ClipData.newPlainText(AppDesignSpecBuilder.ADMIN_SPEC_FILENAME, adminDesignSpecText)
-                )
-                Toast.makeText(context, context.getString(R.string.admin_design_spec_copied), Toast.LENGTH_SHORT).show()
+                try {
+                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    clipboard.setPrimaryClip(
+                        ClipData.newPlainText(AppDesignSpecBuilder.ADMIN_SPEC_FILENAME, adminDesignSpecText)
+                    )
+                    Toast.makeText(context, context.getString(R.string.admin_design_spec_copied), Toast.LENGTH_SHORT).show()
+                } catch (_: Exception) { }
             },
             onShare = { AppDesignSpecBuilder.shareSpecTextFile(context, adminDesignSpecText) },
             onDismissRequest = { showAdminSpecDialog = false }
@@ -1265,6 +1386,8 @@ private fun PinSetupDialog(
 @Composable
 private fun AdminDesignSpecDialog(
     specText: String,
+    includeSensitiveIds: Boolean,
+    onToggleIncludeSensitiveIds: (Boolean) -> Unit,
     onCopy: () -> Unit,
     onShare: () -> Unit,
     onDismissRequest: () -> Unit
@@ -1290,13 +1413,34 @@ private fun AdminDesignSpecDialog(
                     fontWeight = FontWeight.Bold,
                     color = theme.primaryColor
                 )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = stringResource(R.string.admin_include_sensitive_ids),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = theme.primaryColor,
+                        fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Switch(
+                        checked = includeSensitiveIds,
+                        onCheckedChange = onToggleIncludeSensitiveIds,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = theme.surfaceColor,
+                            checkedTrackColor = theme.primaryColor
+                        )
+                    )
+                }
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = theme.backgroundColor,
                     border = BorderStroke(1.dp, theme.cardBorderColor.copy(alpha = 0.6f)),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(360.dp)
+                        .height(340.dp)
                 ) {
                     Text(
                         text = specText,

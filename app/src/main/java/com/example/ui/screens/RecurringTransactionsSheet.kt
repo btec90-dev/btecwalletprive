@@ -717,8 +717,8 @@ fun AddRecurringFormSheet(
                 Spacer(modifier = Modifier.width(12.dp))
                 Button(
                     onClick = {
-                        val parsedAmount = amountText.toDoubleOrNull()
-                        if (parsedAmount == null || parsedAmount <= 0) {
+                        val parsedAmountBd = Currencies.parseBigDecimal(amountText)
+                        if (parsedAmountBd == null || parsedAmountBd.compareTo(java.math.BigDecimal.ZERO) <= 0) {
                             errorMessage = "Veuillez entrer un montant valide supérieur à 0."
                         } else if (payee.isBlank()) {
                             errorMessage = "Veuillez entrer une description ou nom de bénéficiaire."
@@ -730,7 +730,7 @@ fun AddRecurringFormSheet(
                             val entity = RecurringTransactionEntity(
                                 accountId = accountId,
                                 type = type,
-                                amount = parsedAmount,
+                                amount = Currencies.toMoneyBigDecimal(parsedAmountBd.toDouble()).toDouble(),
                                 payee = payee.trim(),
                                 category = category,
                                 frequency = frequency,

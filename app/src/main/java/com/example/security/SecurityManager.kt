@@ -33,25 +33,30 @@ class SecurityManager(context: Context) {
         prefs.edit().putBoolean("biometric_enabled", enabled).apply()
     }
 
-    fun setPin(pin: String): Boolean {
+    fun setPin(pin: String, enableAppLock: Boolean = true): Boolean {
         if (pin.length != 4 || !pin.all { it.isDigit() }) return false
         val hash = hashPin(pin)
-        prefs.edit()
-            .putString("pin_hash", hash)
-            .putBoolean("pin_lock_enabled", true)
-            .apply()
-        isLocked = false
+        val editor = prefs.edit().putString("pin_hash", hash)
+        if (enableAppLock) {
+            editor.putBoolean("pin_lock_enabled", true)
+            isLocked = false
+        }
+        editor.apply()
         return true
     }
 
     fun verifyPin(inputPin: String): Boolean {
-        val storedHash = prefs.getString("pin_hash", null) ?: return false
-        val inputHash = hashPin(inputPin)
-        val valid = storedHash == inputHash
+        val valid = verifyPinOnly(inputPin)
         if (valid) {
             isLocked = false
         }
         return valid
+    }
+
+    fun verifyPinOnly(inputPin: String): Boolean {
+        val storedHash = prefs.getString("pin_hash", null) ?: return false
+        val inputHash = hashPin(inputPin)
+        return storedHash == inputHash
     }
 
     fun unlockByBiometric() {

@@ -51,6 +51,8 @@ import com.example.ui.components.CategorySpending
 import com.example.ui.components.MonthlyTrend
 import com.example.ui.components.MonthlyTrendBarChart
 import com.example.ui.theme.LocalArtisanTheme
+import java.math.BigDecimal
+import java.math.RoundingMode
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -73,31 +75,40 @@ fun AnalyticsScreen(
         }
     }
 
-    // Categorical spending computation
+    // Categorical spending computation using BigDecimal
     val expenseCategories = remember(cfaTransactions) {
         val expenseTx = cfaTransactions.filter { it.type == TransactionType.EXPENSE }
         val grouped = expenseTx.groupBy { it.category }
-            .mapValues { entry -> entry.value.sumOf { it.amount } }
+            .mapValues { entry -> Currencies.sumAmounts(entry.value.map { it.amount }) }
             .toList()
             .sortedByDescending { it.second }
 
-        grouped.mapIndexed { index, (cat, amount) ->
+        grouped.mapIndexed { index, (cat, amountBd) ->
             CategorySpending(
                 category = cat,
-                amount = amount,
+                amount = amountBd.toDouble(),
                 color = CHART_PALETTE[index % CHART_PALETTE.size]
             )
         }
     }
 
-    val totalIncome = remember(cfaTransactions) {
-        cfaTransactions.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
+    val totalIncomeBd: BigDecimal = remember(cfaTransactions) {
+        Currencies.sumAmounts(cfaTransactions.filter { it.type == TransactionType.INCOME }.map { it.amount })
     }
-    val totalExpense = remember(cfaTransactions) {
-        cfaTransactions.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+    val totalExpenseBd: BigDecimal = remember(cfaTransactions) {
+        Currencies.sumAmounts(cfaTransactions.filter { it.type == TransactionType.EXPENSE }.map { it.amount })
     }
-    val netCashFlow = totalIncome - totalExpense
-    val savingsRate = if (totalIncome > 0) ((totalIncome - totalExpense) / totalIncome * 100.0).coerceIn(0.0, 100.0) else 0.0
+    val netCashFlowBd: BigDecimal = totalIncomeBd.subtract(totalExpenseBd).setScale(2, RoundingMode.HALF_UP)
+    val netCashFlowNonNegative = netCashFlowBd.compareTo(BigDecimal.ZERO) >= 0
+    val savingsRate: Double = if (totalIncomeBd.compareTo(BigDecimal.ZERO) > 0) {
+        netCashFlowBd
+            .multiply(BigDecimal(100))
+            .divide(totalIncomeBd, 2, RoundingMode.HALF_UP)
+            .toDouble()
+            .coerceIn(0.0, 100.0)
+    } else {
+        0.0
+    }
 
     // Monthly trends computation (last 5 calendar months fitted cleanly across width)
     val monthlyTrends = remember(cfaTransactions) {
@@ -111,15 +122,19 @@ fun AnalyticsScreen(
         }
 
         months.map { (key, display) ->
-            val inc = cfaTransactions.filter {
-                it.type == TransactionType.INCOME &&
-                monthKeyFormat.format(Date(it.timestamp)) == key
-            }.sumOf { it.amount }
+            val inc = Currencies.sumAmounts(
+                cfaTransactions.filter {
+                    it.type == TransactionType.INCOME &&
+                        monthKeyFormat.format(Date(it.timestamp)) == key
+                }.map { it.amount }
+            ).toDouble()
 
-            val exp = cfaTransactions.filter {
-                it.type == TransactionType.EXPENSE &&
-                monthKeyFormat.format(Date(it.timestamp)) == key
-            }.sumOf { it.amount }
+            val exp = Currencies.sumAmounts(
+                cfaTransactions.filter {
+                    it.type == TransactionType.EXPENSE &&
+                        monthKeyFormat.format(Date(it.timestamp)) == key
+                }.map { it.amount }
+            ).toDouble()
 
             MonthlyTrend(
                 monthName = display,
@@ -161,9 +176,9 @@ fun AnalyticsScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
-                                    imageVector = if (netCashFlow >= 0) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
+                                    imageVector = if (netCashFlowNonNegative) Icons.Default.TrendingUp else Icons.Default.TrendingDown,
                                     contentDescription = null,
-                                    tint = if (netCashFlow >= 0) Color(0xFF2E7D32) else Color(0xFFC62828),
+                                    tint = if (netCashFlowNonNegative) Color(0xFF2E7D32) else Color(0xFFC62828),
                                     modifier = Modifier.size(16.dp)
                                 )
                             }
@@ -176,10 +191,10 @@ fun AnalyticsScreen(
                         }
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = Currencies.format(netCashFlow, baseCurrency),
+                            text = Currencies.format(netCashFlowBd, baseCurrency),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = if (netCashFlow >= 0) Color(0xFF2E7D32) else Color(0xFFC62828)
+                            color = if (netCashFlowNonNegative) Color(0xFF2E7D32) else Color(0xFFC62828)
                         )
                     }
                 }

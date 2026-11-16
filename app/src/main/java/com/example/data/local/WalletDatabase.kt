@@ -6,15 +6,13 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.AccountEntity
-import com.example.data.model.AccountType
 import com.example.data.model.ContactEntity
 import com.example.data.model.RecurringTransactionEntity
+import com.example.data.model.SeedAccountIds
 import com.example.data.model.TransactionEntity
-import com.example.data.model.TwtAccountHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.util.UUID
 
 @Database(
     entities = [
@@ -59,71 +57,7 @@ abstract class WalletDatabase : RoomDatabase() {
 
         suspend fun populateInitialData(dao: WalletDao) {
             val now = System.currentTimeMillis()
-
-            val defaultAccounts = listOf(
-                AccountEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = "Espèces (CFA)",
-                    type = AccountType.CASH,
-                    balance = 0.0,
-                    currencyCode = "CFA",
-                    emojiAvatar = "💵",
-                    sortOrder = 0,
-                    updatedAt = now
-                ),
-                AccountEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = "Tap Tap Send",
-                    type = AccountType.CUSTOM,
-                    balance = 0.0,
-                    currencyCode = "CFA",
-                    emojiAvatar = "📲",
-                    sortOrder = 1,
-                    updatedAt = now
-                ),
-                AccountEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = "MoneyGram",
-                    type = AccountType.CUSTOM,
-                    balance = 0.0,
-                    currencyCode = "CFA",
-                    emojiAvatar = "💸",
-                    sortOrder = 2,
-                    updatedAt = now
-                ),
-                AccountEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = "Transfert / Virement",
-                    type = AccountType.CUSTOM,
-                    balance = 0.0,
-                    currencyCode = "CFA",
-                    emojiAvatar = "🔄",
-                    sortOrder = 3,
-                    updatedAt = now
-                ),
-                AccountEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = "Carte Bancaire",
-                    type = AccountType.CARD,
-                    balance = 0.0,
-                    currencyCode = "CFA",
-                    emojiAvatar = "💳",
-                    sortOrder = 4,
-                    updatedAt = now
-                ),
-                AccountEntity(
-                    id = UUID.randomUUID().toString(),
-                    name = TwtAccountHelper.currentTwtAccountName(),
-                    type = AccountType.SAVINGS,
-                    balance = 0.0,
-                    currencyCode = "USD",
-                    emojiAvatar = "🪙",
-                    sortOrder = 5,
-                    updatedAt = now
-                )
-            )
-
-            defaultAccounts.forEach { dao.insertAccount(it) }
+            dao.insertSeedAccounts(SeedAccountIds.defaultSeedAccounts(now))
             // Zero pre-loaded transactions on initial install
         }
     }

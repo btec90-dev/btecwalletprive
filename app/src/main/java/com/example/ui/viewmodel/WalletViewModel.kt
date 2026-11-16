@@ -24,6 +24,7 @@ import com.example.ui.theme.ArtisanThemeConfig
 import com.example.ui.theme.ArtisanThemes
 import com.example.util.AppDesignSpecBuilder
 import com.example.util.AppSpecSnapshot
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,6 +34,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.math.BigDecimal
 
 class WalletViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -75,25 +77,35 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
     private val rawRecurringFlow = repository.recurringTransactionsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Role-Filtered Visible Accounts (strict TWT exclusion unless Primary Admin)
+    // Admin TWT Visibility preference (defaults ON for Admin, toggleable off/on with Biometric/PIN gate on enable)
+    private val _isTwtVisibleEnabled = MutableStateFlow(prefs.getBoolean("twt_visibility_enabled", true))
+    val isTwtVisibleEnabled: StateFlow<Boolean> = _isTwtVisibleEnabled.asStateFlow()
+
+    // Admin .txt Export Sensitive IDs toggle (defaults false = masked DB ID & emails)
+    private val _includeSensitiveIdsInSpec = MutableStateFlow(false)
+    val includeSensitiveIdsInSpec: StateFlow<Boolean> = _includeSensitiveIdsInSpec.asStateFlow()
+
+    // Role-Filtered Visible Accounts (strict TWT exclusion unless Primary Admin AND TWT Visible is ON)
     val accounts: StateFlow<List<AccountEntity>> = combine(
         rawAccountsFlow,
-        accessSession
-    ) { allAccounts, session ->
-        if (session.isAdminTwtVisible) {
+        accessSession,
+        _isTwtVisibleEnabled
+    ) { allAccounts, session, twtVisible ->
+        if (session.isAdminTwtVisible && twtVisible) {
             allAccounts
         } else {
             allAccounts.filter { !TwtAccountHelper.isTwtAccount(it) }
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    // Role-Filtered Visible Transactions (strict TWT exclusion unless Primary Admin)
+    // Role-Filtered Visible Transactions (strict TWT exclusion unless Primary Admin AND TWT Visible is ON)
     val transactions: StateFlow<List<TransactionEntity>> = combine(
         rawTransactionsFlow,
         rawAccountsFlow,
-        accessSession
-    ) { allTx, allAccs, session ->
-        if (session.isAdminTwtVisible) {
+        accessSession,
+        _isTwtVisibleEnabled
+    ) { allTx, allAccs, session, twtVisible ->
+        if (session.isAdminTwtVisible && twtVisible) {
             allTx
         } else {
             val twtIds = allAccs.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
@@ -105,9 +117,10 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
     val recurringTransactions: StateFlow<List<RecurringTransactionEntity>> = combine(
         rawRecurringFlow,
         rawAccountsFlow,
-        accessSession
-    ) { allRec, allAccs, session ->
-        if (session.isAdminTwtVisible) {
+        accessSession,
+        _isTwtVisibleEnabled
+    ) { allRec, allAccs, session, twtVisible ->
+        if (session.isAdminTwtVisible && twtVisible) {
             allRec
         } else {
             val twtIds = allAccs.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
@@ -120,39 +133,49 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
 
     val customCategories: StateFlow<List<Pair<String, String>>> = repository.customCategoriesFlow
 
-    // Separate CFA vs TWT(USD) Metrics (never mix USD with CFA)
-    val totalBalance: StateFlow<Double> = accounts.combine(transactions) { accs, _ ->
-        accs.filter { !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it) == "CFA" }
-            .sumOf { it.balance }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+    // Separate CFA vs TWT(USD) Metrics with BigDecimal precision (never mix USD with CFA)
+    val totalBalance: StateFlow<BigDecimal> = accounts.combine(transactions) { accs, _ ->
+        Currencies.sumAmounts(
+            accs.filter { !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it) == "CFA" }
+                .map { it.balance }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), BigDecimal.ZERO)
 
-    val totalIncome: StateFlow<Double> = combine(transactions, accounts) { txs, accs ->
+    val totalIncome: StateFlow<BigDecimal> = combine(transactions, accounts) { txs, accs ->
         val accMap = accs.associateBy { it.id }
-        txs.filter {
-            it.type == TransactionType.INCOME &&
-                !it.isDeleted &&
-                !TwtAccountHelper.isTwtAccount(accMap[it.accountId]) &&
-                Currencies.effectiveCurrencyCode(accMap[it.accountId], "CFA") == "CFA"
-        }.sumOf { it.amount }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+        Currencies.sumAmounts(
+            txs.filter {
+                it.type == TransactionType.INCOME &&
+                    !it.isDeleted &&
+                    !TwtAccountHelper.isTwtAccount(accMap[it.accountId]) &&
+                    Currencies.effectiveCurrencyCode(accMap[it.accountId], "CFA") == "CFA"
+            }.map { it.amount }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), BigDecimal.ZERO)
 
-    val totalExpense: StateFlow<Double> = combine(transactions, accounts) { txs, accs ->
+    val totalExpense: StateFlow<BigDecimal> = combine(transactions, accounts) { txs, accs ->
         val accMap = accs.associateBy { it.id }
-        txs.filter {
-            it.type == TransactionType.EXPENSE &&
-                !it.isDeleted &&
-                !TwtAccountHelper.isTwtAccount(accMap[it.accountId]) &&
-                Currencies.effectiveCurrencyCode(accMap[it.accountId], "CFA") == "CFA"
-        }.sumOf { it.amount }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+        Currencies.sumAmounts(
+            txs.filter {
+                it.type == TransactionType.EXPENSE &&
+                    !it.isDeleted &&
+                    !TwtAccountHelper.isTwtAccount(accMap[it.accountId]) &&
+                    Currencies.effectiveCurrencyCode(accMap[it.accountId], "CFA") == "CFA"
+            }.map { it.amount }
+        )
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), BigDecimal.ZERO)
 
     // Dedicated TWT USD ($) balance for Primary Admin hero display
-    val twtUsdBalance: StateFlow<Double?> = combine(rawAccountsFlow, accessSession) { accs, session ->
-        if (!session.isAdminTwtVisible) {
+    val twtUsdBalance: StateFlow<BigDecimal?> = combine(
+        rawAccountsFlow,
+        accessSession,
+        _isTwtVisibleEnabled
+    ) { accs, session, twtVisible ->
+        if (!session.isAdminTwtVisible || !twtVisible) {
             null
         } else {
             val twtAccs = accs.filter { TwtAccountHelper.isTwtAccount(it) }
-            if (twtAccs.isEmpty()) null else twtAccs.sumOf { it.balance }
+            if (twtAccs.isEmpty()) null else Currencies.sumAmounts(twtAccs.map { it.balance })
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
@@ -175,7 +198,9 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
         val baseCurrency: String,
         val language: String,
         val isPinEnabled: Boolean,
-        val isBiometricEnabled: Boolean
+        val isBiometricEnabled: Boolean,
+        val isTwtVisibleEnabled: Boolean,
+        val includeSensitiveIds: Boolean
     )
 
     private data class DataSpecState(
@@ -192,7 +217,11 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
         _isPinEnabled,
         _isBiometricEnabled
     ) { theme, currency, lang, pin, bio ->
-        SettingsSpecState(theme, currency, lang, pin, bio)
+        SettingsSpecState(theme, currency, lang, pin, bio, _isTwtVisibleEnabled.value, _includeSensitiveIdsInSpec.value)
+    }.combine(_isTwtVisibleEnabled) { st, twtVis ->
+        st.copy(isTwtVisibleEnabled = twtVis)
+    }.combine(_includeSensitiveIdsInSpec) { st, incSensitive ->
+        st.copy(includeSensitiveIds = incSensitive)
     }
 
     private val dataSpecFlow = combine(
@@ -222,6 +251,8 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
                     currentLanguage = settings.language,
                     isPinEnabled = settings.isPinEnabled,
                     isBiometricEnabled = settings.isBiometricEnabled,
+                    isTwtVisibleEnabled = settings.isTwtVisibleEnabled,
+                    includeSensitiveIds = settings.includeSensitiveIds,
                     accounts = data.accounts,
                     transactions = data.transactions,
                     recurringTransactions = data.recurring,
@@ -233,26 +264,34 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
 
     init {
         viewModelScope.launch {
-            if (!prefs.getBoolean("transactions_cleaned_v6", false)) {
-                repository.clearAllTransactions()
-                cloudSyncManager.clearAllTransactionsRemote()
-                prefs.edit().putBoolean("transactions_cleaned_v6", true).apply()
-            }
-            // Migrate legacy TWT naming & FCFA labels cleanly
-            repository.normalizeAccountsOnStartup()
+            try {
+                if (!prefs.getBoolean("transactions_cleaned_v6", false)) {
+                    repository.clearAllTransactions()
+                    cloudSyncManager.clearAllTransactionsRemote()
+                    prefs.edit().putBoolean("transactions_cleaned_v6", true).apply()
+                }
+                // Migrate legacy TWT naming & deduplicate 0.00 seed accounts on startup
+                repository.normalizeAccountsOnStartup()
 
-            if (cloudSyncManager.syncState.value.isAuthenticated) {
-                cloudSyncManager.startRealtimeSync(repository, viewModelScope)
-                cloudSyncManager.performSync(repository)
+                if (cloudSyncManager.syncState.value.isAuthenticated && cloudSyncManager.syncState.value.isSyncEnabled) {
+                    cloudSyncManager.startRealtimeSync(repository, viewModelScope)
+                    cloudSyncManager.performSync(repository)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                // Local Room remains usable even if startup cloud sync encounters network failure
             }
         }
         viewModelScope.launch(Dispatchers.IO) {
             adminDesignSpecText.collectLatest { specText ->
-                AppDesignSpecBuilder.syncSpecFileOnDisk(
-                    context = getApplication(),
-                    session = accessSession.value,
-                    specText = specText
-                )
+                try {
+                    AppDesignSpecBuilder.syncSpecFileOnDisk(
+                        context = getApplication(),
+                        session = accessSession.value,
+                        specText = specText
+                    )
+                } catch (_: Exception) { }
             }
         }
     }
@@ -307,10 +346,19 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
         _isBiometricEnabled.value = enable
     }
 
+    fun setTwtVisibleEnabled(enabled: Boolean) {
+        _isTwtVisibleEnabled.value = enabled
+        prefs.edit().putBoolean("twt_visibility_enabled", enabled).apply()
+    }
+
+    fun setIncludeSensitiveIdsInSpec(include: Boolean) {
+        _includeSensitiveIdsInSpec.value = include
+    }
+
     // Access Control (Passcode Switch / Login)
     fun verifyPasscodeLogin(email: String, passcode: String): PasscodeLoginResult {
         val result = accessControlManager.verifyAndSwitchWithPasscode(email, passcode)
-        if (result is PasscodeLoginResult.Success && cloudSyncManager.syncState.value.isAuthenticated) {
+        if (result is PasscodeLoginResult.Success && cloudSyncManager.syncState.value.isAuthenticated && syncState.value.isSyncEnabled) {
             cloudSyncManager.startRealtimeSync(repository, viewModelScope)
         }
         return result
@@ -370,6 +418,35 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             repository.addTransaction(transaction)
             triggerSync()
+        }
+    }
+
+    fun addRemittanceFx(
+        usdAccountId: String,
+        cfaAccountId: String,
+        amountSentUsd: BigDecimal,
+        feeUsd: BigDecimal,
+        exchangeRateUsdToCfa: BigDecimal,
+        payee: String,
+        category: String,
+        timestamp: Long,
+        notes: String
+    ) {
+        viewModelScope.launch {
+            val res = repository.executeRemittanceFxTransaction(
+                usdAccountId = usdAccountId,
+                cfaAccountId = cfaAccountId,
+                amountSentUsd = amountSentUsd,
+                feeUsd = feeUsd,
+                exchangeRateUsdToCfa = exchangeRateUsdToCfa,
+                payee = payee,
+                category = category,
+                timestamp = timestamp,
+                notes = notes
+            )
+            if (res != null) {
+                triggerSync()
+            }
         }
     }
 
@@ -459,8 +536,31 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
     // Cloud Sync Operations
     fun onAuthSuccess() {
         viewModelScope.launch {
-            cloudSyncManager.startRealtimeSync(repository, viewModelScope)
-            cloudSyncManager.performSync(repository)
+            try {
+                cloudSyncManager.enableSync()
+                cloudSyncManager.startRealtimeSync(repository, viewModelScope)
+                cloudSyncManager.performSync(repository)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) { }
+        }
+    }
+
+    fun toggleSync(enabled: Boolean) {
+        viewModelScope.launch {
+            try {
+                if (enabled) {
+                    cloudSyncManager.enableSync()
+                    if (syncState.value.isAuthenticated) {
+                        cloudSyncManager.startRealtimeSync(repository, viewModelScope)
+                        cloudSyncManager.performSync(repository)
+                    }
+                } else {
+                    cloudSyncManager.disableSync()
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) { }
         }
     }
 
@@ -472,23 +572,38 @@ class WalletViewModel(application: Application) : AndroidViewModel(application) 
 
     fun syncNow() {
         viewModelScope.launch {
-            cloudSyncManager.performSync(repository)
+            try {
+                cloudSyncManager.performSync(repository)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) { }
         }
     }
 
     private fun triggerSync() {
         viewModelScope.launch {
-            if (syncState.value.isSyncEnabled && syncState.value.isAuthenticated) {
-                cloudSyncManager.performSync(repository)
-            }
+            try {
+                if (syncState.value.isSyncEnabled && syncState.value.isAuthenticated) {
+                    cloudSyncManager.performSync(repository)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) { }
         }
     }
 
     // Export & Import (role-scoped TWT exclusion)
-    suspend fun exportJson(): String = repository.exportToJson(includeTwt = accessSession.value.isAdminTwtVisible)
-    suspend fun exportCsv(): String = repository.exportToCsv(includeTwt = accessSession.value.isAdminTwtVisible)
+    suspend fun exportJson(): String = repository.exportToJson(
+        includeTwt = accessSession.value.isAdminTwtVisible && _isTwtVisibleEnabled.value
+    )
+    suspend fun exportCsv(): String = repository.exportToCsv(
+        includeTwt = accessSession.value.isAdminTwtVisible && _isTwtVisibleEnabled.value
+    )
     suspend fun importJson(json: String): Pair<Int, Int> {
-        val res = repository.importFromJson(json, includeTwt = accessSession.value.isAdminTwtVisible)
+        val res = repository.importFromJson(
+            jsonString = json,
+            includeTwt = accessSession.value.isAdminTwtVisible && _isTwtVisibleEnabled.value
+        )
         triggerSync()
         return res
     }

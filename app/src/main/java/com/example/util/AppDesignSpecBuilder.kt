@@ -21,6 +21,7 @@ import com.example.security.UserRole
 import com.example.ui.theme.ArtisanThemeConfig
 import com.example.ui.theme.ArtisanThemes
 import java.io.File
+import java.math.BigDecimal
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -34,6 +35,8 @@ data class AppSpecSnapshot(
     val currentLanguage: String,
     val isPinEnabled: Boolean,
     val isBiometricEnabled: Boolean,
+    val isTwtVisibleEnabled: Boolean = false,
+    val includeSensitiveIds: Boolean = false,
     val accounts: List<AccountEntity>,
     val transactions: List<TransactionEntity>,
     val recurringTransactions: List<RecurringTransactionEntity>,
@@ -44,10 +47,26 @@ data class AppSpecSnapshot(
 object AppDesignSpecBuilder {
 
     const val ADMIN_SPEC_FILENAME = "balatec_app_details_design.txt"
+    private const val FIRESTORE_DB_ID = "ai-studio-android-balatecs-4baf2e8b-4fe1-4d7a-a144-fd45aa8e45ca"
 
     fun isEligibleForAdminSpec(session: AccessSession): Boolean {
         return session.role == UserRole.ADMIN &&
             session.activeEmail.equals(AccessControlManager.ADMIN_EMAIL, ignoreCase = true)
+    }
+
+    fun maskEmail(email: String?): String {
+        if (email.isNullOrBlank()) return "N/A"
+        val atIdx = email.indexOf('@')
+        if (atIdx <= 0) return "***"
+        val local = email.substring(0, atIdx)
+        val domain = email.substring(atIdx)
+        val prefix = local.take(minOf(3, local.length))
+        return "$prefix***$domain"
+    }
+
+    fun maskDbId(dbId: String): String {
+        if (dbId.length <= 14) return "***"
+        return "${dbId.take(10)}***${dbId.takeLast(5)}"
     }
 
     fun buildText(snapshot: AppSpecSnapshot): String {
@@ -58,25 +77,37 @@ object AppDesignSpecBuilder {
         }
         val dateFmt = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US)
 
+        val reveal = snapshot.includeSensitiveIds
+        fun displayEmail(email: String?): String = when {
+            email.isNullOrBlank() -> "None"
+            reveal -> email
+            else -> maskEmail(email)
+        }
+        val displayedDbId = if (reveal) FIRESTORE_DB_ID else maskDbId(FIRESTORE_DB_ID)
+
         val accountMap = snapshot.accounts.associateBy { it.id }
         val nonTwtCfaAccounts = snapshot.accounts.filter {
             !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it) == "CFA"
         }
         val twtAccounts = snapshot.accounts.filter { TwtAccountHelper.isTwtAccount(it) }
-        val nonTwtBalance = nonTwtCfaAccounts.sumOf { it.balance }
-        val twtBalance = twtAccounts.sumOf { it.balance }
+        val nonTwtBalance: BigDecimal = Currencies.sumAmounts(nonTwtCfaAccounts.map { it.balance })
+        val twtBalance: BigDecimal = Currencies.sumAmounts(twtAccounts.map { it.balance })
 
         val activeTransactions = snapshot.transactions.filter { !it.isDeleted }
-        val cfaIncome = activeTransactions.filter {
-            it.type == TransactionType.INCOME &&
-                !TwtAccountHelper.isTwtAccount(accountMap[it.accountId]) &&
-                Currencies.effectiveCurrencyCode(accountMap[it.accountId], "CFA") == "CFA"
-        }.sumOf { it.amount }
-        val cfaExpense = activeTransactions.filter {
-            it.type == TransactionType.EXPENSE &&
-                !TwtAccountHelper.isTwtAccount(accountMap[it.accountId]) &&
-                Currencies.effectiveCurrencyCode(accountMap[it.accountId], "CFA") == "CFA"
-        }.sumOf { it.amount }
+        val cfaIncome: BigDecimal = Currencies.sumAmounts(
+            activeTransactions.filter {
+                it.type == TransactionType.INCOME &&
+                    !TwtAccountHelper.isTwtAccount(accountMap[it.accountId]) &&
+                    Currencies.effectiveCurrencyCode(accountMap[it.accountId], "CFA") == "CFA"
+            }.map { it.amount }
+        )
+        val cfaExpense: BigDecimal = Currencies.sumAmounts(
+            activeTransactions.filter {
+                it.type == TransactionType.EXPENSE &&
+                    !TwtAccountHelper.isTwtAccount(accountMap[it.accountId]) &&
+                    Currencies.effectiveCurrencyCode(accountMap[it.accountId], "CFA") == "CFA"
+            }.map { it.amount }
+        )
 
         val allCategories = WalletCategories.combined(snapshot.customCategories)
 
@@ -84,19 +115,20 @@ object AppDesignSpecBuilder {
             appendLine("================================================================================")
             appendLine("BALATEC SECURE WALLET — LIVE APP CONTENTS, ARCHITECTURE & DESIGN (.TXT)")
             appendLine("================================================================================")
-            appendLine("Admin Owner       : ${AccessControlManager.ADMIN_EMAIL}")
+            appendLine("Admin Owner       : ${displayEmail(AccessControlManager.ADMIN_EMAIL)}")
+            appendLine("Sensitive IDs     : ${if (reveal) "EXPOSED" else "MASKED (Safe Default)"}")
             appendLine("Last Auto-Updated : ${utcFmt.format(Date(snapshot.generatedAtMillis))}")
             appendLine("Application ID    : ${BuildConfig.APPLICATION_ID}")
             appendLine("Version           : ${BuildConfig.VERSION_NAME} (code ${BuildConfig.VERSION_CODE})")
-            appendLine("Firestore DB ID   : ai-studio-android-balatecs-4baf2e8b-4fe1-4d7a-a144-fd45aa8e45ca")
+            appendLine("Firestore DB ID   : $displayedDbId")
             appendLine()
 
             appendLine("--------------------------------------------------------------------------------")
             appendLine("1. LIVE SESSION, SETTINGS & SYNC STATUS")
             appendLine("--------------------------------------------------------------------------------")
-            appendLine("Active Email      : ${snapshot.accessSession.activeEmail ?: "Signed out"}")
-            appendLine("Google Account    : ${snapshot.accessSession.googleEmail ?: "Not linked"}")
-            appendLine("Role              : ${snapshot.accessSession.role} (TWT Visible: ${snapshot.accessSession.isAdminTwtVisible})")
+            appendLine("Active Email      : ${snapshot.accessSession.activeEmail?.let { displayEmail(it) } ?: "Signed out"}")
+            appendLine("Google Account    : ${snapshot.accessSession.googleEmail?.let { displayEmail(it) } ?: "Not linked"}")
+            appendLine("Role              : ${snapshot.accessSession.role} (TWT Visible: ${snapshot.isTwtVisibleEnabled && snapshot.accessSession.isAdminTwtVisible})")
             appendLine("Active Theme      : ${snapshot.currentTheme.name} [${snapshot.currentTheme.id}]")
             appendLine("Hardware Finish   : ${snapshot.currentTheme.hardwareName} (${colorHex(snapshot.currentTheme.metallicAccent)})")
             appendLine("Base Currency     : ${snapshot.baseCurrency} (TWT locked to USD $)")
@@ -185,7 +217,8 @@ object AppDesignSpecBuilder {
             appendLine("Typography     : Serif Display (32sp) + SansSerif Tabular Numerals (tnum) for financial values")
             appendLine("Navigation     : TopAppBar (Logo + Sync Badge) + 4 Tabs (Ledger, Accounts, Categories, Settings)")
             appendLine("Surface Texture: Modifier.artisanLeatherTexture (ArtisanCard) + artisanNavigationBarLeather (NavigationBar metallic rim & stitch seam)")
-            appendLine("Account Cards  : Slide-to-delete DISABLED; explicit Edit/Delete via 3-dot MoreVert menu")
+            appendLine("Account Cards  : Slide-to-delete DISABLED; TWT 2026 badged with embossed lock + USD ($) + Biometric/PIN gate")
+            appendLine("FX Remittance  : Optional USD Sent + Fee + Exchange Rate -> Net CFA = Amount * Rate (BigDecimal precision)")
             appendLine()
             ArtisanThemes.ALL_THEMES.forEachIndexed { idx, t ->
                 val group = if (t.isClassic) "Classic" else "Bold"
@@ -201,14 +234,14 @@ object AppDesignSpecBuilder {
             appendLine("--------------------------------------------------------------------------------")
             appendLine("7. ARCHITECTURE, FIRESTORE ISOLATION & SECURITY RULES")
             appendLine("--------------------------------------------------------------------------------")
-            appendLine("Architecture   : Clean MVVM + Offline-first Room (accounts, transactions, recurring, contacts) + Cloud Firestore")
-            appendLine("Admin Access   : ${AccessControlManager.ADMIN_EMAIL} -> Shared Wallet + Private TWT + Admin Design Spec")
-            appendLine("Shared Access  : ${AccessControlManager.SECONDARY_EMAIL} -> Shared Wallet only (TWT strictly excluded)")
+            appendLine("Architecture   : Clean MVVM + Offline-first Room (deterministic seed IDs) + Cloud Firestore (SetOptions.merge)")
+            appendLine("Admin Access   : ${displayEmail(AccessControlManager.ADMIN_EMAIL)} -> Shared Wallet + Private TWT + Admin Design Spec")
+            appendLine("Shared Access  : ${displayEmail(AccessControlManager.SECONDARY_EMAIL)} -> Shared Wallet only (TWT strictly excluded)")
             appendLine("Firestore Paths:")
             appendLine("  - Shared     : shared_wallets/balatec_shared/{accounts, transactions, recurring, categories}")
-            appendLine("  - TWT Private: private_twt/admin_only/{accounts, transactions, recurring}")
-            appendLine("Auth & Lock    : Google Sign-In (CredentialManager) + Case-sensitive Secrets Passcode + 4-digit PIN + BiometricPrompt")
-            appendLine("PDF & Exports  : PdfReportExporter (All/Account/Payee/Category/Date/Type filters) + JSON/CSV + Admin .txt")
+            appendLine("  - TWT Private: private_twt/{document=**} (${displayEmail(AccessControlManager.ADMIN_EMAIL)} only)")
+            appendLine("Auth & Lock    : Google Sign-In (CredentialManager) + Secrets Passcode + 4-digit PIN + BiometricPrompt")
+            appendLine("PDF & Exports  : PdfReportExporter (empty-ledger safe, BigDecimal totals) + JSON/CSV + Admin .txt (masked by default)")
             appendLine("================================================================================")
         }
     }
@@ -240,6 +273,7 @@ object AppDesignSpecBuilder {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             val chooser = Intent.createChooser(sendIntent, "Exporter Balatec_App_Details_Design.txt")
+            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             context.startActivity(chooser)
             true
         } catch (_: Exception) {

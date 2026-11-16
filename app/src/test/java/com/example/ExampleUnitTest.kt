@@ -75,16 +75,47 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun walletCategories_containBonusFamilleAndRemittance() {
+    fun walletCategories_containBonusFamilleAndCitiesWithoutPaymentRails() {
         val categories = com.example.data.model.WalletCategories.ALL.map { it.first }
         assertTrue(categories.contains("Bonus"))
         assertTrue(categories.contains("Famille"))
-        assertTrue(categories.contains("Transfert"))
-        assertTrue(categories.contains("MoneyGram"))
-        assertTrue(categories.contains("Tap Tap Send"))
         assertTrue(categories.contains("Bamako"))
         assertTrue(categories.contains("Abidjan"))
+        assertFalse(categories.contains("Transfert"))
+        assertFalse(categories.contains("MoneyGram"))
+        assertFalse(categories.contains("Tap Tap Send"))
         assertFalse(categories.contains("TWT"))
+
+        val cities = com.example.data.model.PresetFamilyContacts.CITIES.map { it.first }
+        assertEquals(listOf("Bamako", "Abidjan"), cities)
+    }
+
+    @Test
+    fun seedAccountIds_provideExactlySixDeterministicAccounts() {
+        val seeds = com.example.data.model.SeedAccountIds.defaultSeedAccounts(1700000000000L)
+        assertEquals(6, seeds.size)
+        assertEquals(com.example.data.model.SeedAccountIds.ALL_IDS, seeds.map { it.id }.toSet())
+        val twt = seeds.first { it.id == com.example.data.model.SeedAccountIds.TWT_2026 }
+        assertEquals(TwtAccountHelper.currentTwtAccountName(), twt.name)
+        assertEquals("USD", twt.currencyCode)
+        assertTrue(TwtAccountHelper.isTwtAccount(twt))
+    }
+
+    @Test
+    fun bigDecimal_fxAndCurrencyArithmetic_isExact() {
+        val parsed = Currencies.parseBigDecimal("1 250,50")
+        assertEquals(java.math.BigDecimal("1250.50"), parsed)
+        assertEquals(null, Currencies.parseBigDecimal(""))
+        assertEquals(null, Currencies.parseBigDecimal("abc"))
+
+        val sentUsd = java.math.BigDecimal("100.00")
+        val feeUsd = java.math.BigDecimal("3.99")
+        val rate = java.math.BigDecimal("605")
+        assertEquals(java.math.BigDecimal("103.99"), Currencies.computeTotalUsdDeduction(sentUsd, feeUsd))
+        assertEquals(java.math.BigDecimal("60500.00"), Currencies.computeNetCfaFromFx(sentUsd, rate))
+
+        val sum = Currencies.sumAmounts(listOf(0.1, 0.2, 100.55))
+        assertEquals(java.math.BigDecimal("100.85"), sum)
     }
 
     @Test
@@ -105,7 +136,7 @@ class ExampleUnitTest {
     }
 
     @Test
-    fun appDesignSpecBuilder_onlyGeneratesForPrimaryAdminAndIncludesDesignAndLiveContents() {
+    fun appDesignSpecBuilder_onlyGeneratesForPrimaryAdminAndMasksSensitiveIdsByDefault() {
         val adminSession = com.example.security.AccessSession(
             activeEmail = "410bala@gmail.com",
             googleEmail = "410bala@gmail.com",
@@ -132,7 +163,7 @@ class ExampleUnitTest {
             )
         )
 
-        val adminSpec = com.example.util.AppDesignSpecBuilder.buildText(
+        val maskedAdminSpec = com.example.util.AppDesignSpecBuilder.buildText(
             com.example.util.AppSpecSnapshot(
                 accessSession = adminSession,
                 syncState = com.example.data.sync.SyncState(isSyncEnabled = true, isAuthenticated = true, userEmail = "410bala@gmail.com"),
@@ -141,6 +172,7 @@ class ExampleUnitTest {
                 currentLanguage = "fr",
                 isPinEnabled = true,
                 isBiometricEnabled = true,
+                includeSensitiveIds = false,
                 accounts = accounts,
                 transactions = txs,
                 recurringTransactions = emptyList(),
@@ -148,15 +180,37 @@ class ExampleUnitTest {
             )
         )
 
-        assertTrue(adminSpec.contains("410bala@gmail.com"))
-        assertTrue(adminSpec.contains("Espresso Brown"))
-        assertTrue(adminSpec.contains("Classic Saddle Tan"))
-        assertTrue(adminSpec.contains("Ivory White Leather"))
-        assertTrue(adminSpec.contains("Cash CFA"))
-        assertTrue(adminSpec.contains("50,000.00 CFA"))
-        assertTrue(adminSpec.contains("$350.00"))
-        assertTrue(adminSpec.contains("Balatec Bonus"))
-        assertTrue(adminSpec.contains("CustomTest [Custom]"))
+        assertTrue(maskedAdminSpec.contains("410***@gmail.com"))
+        assertTrue(maskedAdminSpec.contains("ai-studio-***"))
+        assertFalse(maskedAdminSpec.contains("410bala@gmail.com"))
+        assertFalse(maskedAdminSpec.contains("ai-studio-android-balatecs-4baf2e8b-4fe1-4d7a-a144-fd45aa8e45ca"))
+        assertTrue(maskedAdminSpec.contains("Espresso Brown"))
+        assertTrue(maskedAdminSpec.contains("Classic Saddle Tan"))
+        assertTrue(maskedAdminSpec.contains("Ivory White Leather"))
+        assertTrue(maskedAdminSpec.contains("Cash CFA"))
+        assertTrue(maskedAdminSpec.contains("50,000.00 CFA"))
+        assertTrue(maskedAdminSpec.contains("$350.00"))
+        assertTrue(maskedAdminSpec.contains("Balatec Bonus"))
+        assertTrue(maskedAdminSpec.contains("CustomTest [Custom]"))
+
+        val unmaskedAdminSpec = com.example.util.AppDesignSpecBuilder.buildText(
+            com.example.util.AppSpecSnapshot(
+                accessSession = adminSession,
+                syncState = com.example.data.sync.SyncState(isSyncEnabled = true, isAuthenticated = true, userEmail = "410bala@gmail.com"),
+                currentTheme = com.example.ui.theme.ArtisanThemes.ESPRESSO_BROWN,
+                baseCurrency = "CFA",
+                currentLanguage = "fr",
+                isPinEnabled = true,
+                isBiometricEnabled = true,
+                includeSensitiveIds = true,
+                accounts = accounts,
+                transactions = txs,
+                recurringTransactions = emptyList(),
+                customCategories = listOf("CustomTest" to "⭐")
+            )
+        )
+        assertTrue(unmaskedAdminSpec.contains("410bala@gmail.com"))
+        assertTrue(unmaskedAdminSpec.contains("ai-studio-android-balatecs-4baf2e8b-4fe1-4d7a-a144-fd45aa8e45ca"))
 
         val secondarySpec = com.example.util.AppDesignSpecBuilder.buildText(
             com.example.util.AppSpecSnapshot(

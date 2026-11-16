@@ -181,44 +181,10 @@ service cloud.firestore {
     }
 
     // Strict TWT Isolation: Primary Admin ONLY (410bala@gmail.com)
-    match /private_twt/{ownerKey} {
-      allow get: if isPrimaryAdmin() && ownerKey == 'admin_only';
-
-      match /accounts/{accountId} {
-        allow get, list: if isPrimaryAdmin() && ownerKey == 'admin_only';
-        allow create: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
-          isValidPrivateTwtAccount(incoming(), accountId);
-        allow update: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
-          isValidPrivateTwtAccount(incoming(), accountId) &&
-          incoming().id == existing().id &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['name', 'type', 'balance', 'currencyCode', 'emojiAvatar', 'sortOrder', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
-        allow delete: if isPrimaryAdmin() && ownerKey == 'admin_only';
-      }
-
-      match /transactions/{transactionId} {
-        allow get, list: if isPrimaryAdmin() && ownerKey == 'admin_only';
-        allow create: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
-          isValidTransaction(incoming(), transactionId, true);
-        allow update: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
-          isValidTransaction(incoming(), transactionId, true) &&
-          incoming().id == existing().id &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['accountId', 'type', 'amount', 'payee', 'category', 'timestamp', 'notes', 'currencyCode', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
-        allow delete: if isPrimaryAdmin() && ownerKey == 'admin_only';
-      }
-
-      match /recurring/{recurringId} {
-        allow get, list: if isPrimaryAdmin() && ownerKey == 'admin_only';
-        allow create: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
-          isValidRecurring(incoming(), recurringId);
-        allow update: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
-          isValidRecurring(incoming(), recurringId) &&
-          incoming().id == existing().id &&
-          request.resource.data.diff(resource.data).affectedKeys()
-            .hasOnly(['accountId', 'type', 'amount', 'payee', 'category', 'currencyCode', 'frequency', 'startDate', 'lastExecutedDate', 'nextDueDate', 'isActive', 'notes', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
-        allow delete: if isPrimaryAdmin() && ownerKey == 'admin_only';
-      }
+    match /private_twt/{document=**} {
+      allow read, write: if request.auth != null &&
+        request.auth.token.email == '410bala@gmail.com' &&
+        request.auth.token.email_verified == true;
     }
   }
 }

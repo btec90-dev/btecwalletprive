@@ -3,8 +3,6 @@ package com.example.ui.screens
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.material3.Surface
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,21 +20,18 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CreditCard
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Payments
-import androidx.compose.material.icons.filled.Savings
 import androidx.compose.material.icons.filled.TrendingDown
 import androidx.compose.material.icons.filled.TrendingUp
-import androidx.compose.material.icons.filled.Wallet
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -48,6 +43,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -66,24 +62,30 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.fragment.app.FragmentActivity
 import com.example.R
 import com.example.data.model.AccountEntity
 import com.example.data.model.AccountType
 import com.example.data.model.Currencies
 import com.example.data.model.TwtAccountHelper
+import com.example.security.SecurityManager
 import com.example.ui.components.AccountAvatarPickerDialog
 import com.example.ui.components.ArtisanCard
+import com.example.ui.components.TwtSecurityChallengeDialog
 import com.example.ui.theme.LocalArtisanTheme
+import java.math.BigDecimal
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AccountsScreen(
     accounts: List<AccountEntity>,
-    totalBalance: Double,
-    totalIncome: Double,
-    totalExpense: Double,
+    totalBalance: BigDecimal,
+    totalIncome: BigDecimal,
+    totalExpense: BigDecimal,
     baseCurrency: String,
-    twtUsdBalance: Double? = null,
+    twtUsdBalance: BigDecimal? = null,
+    activity: FragmentActivity? = null,
+    securityManager: SecurityManager? = null,
     onAddAccount: (name: String, type: AccountType, balance: Double, currency: String, emoji: String) -> Unit,
     onUpdateAccount: (AccountEntity) -> Unit,
     onDeleteAccount: (String) -> Unit
@@ -92,6 +94,15 @@ fun AccountsScreen(
     var showAddSheet by remember { mutableStateOf(false) }
     var accountToEdit by remember { mutableStateOf<AccountEntity?>(null) }
     var accountToDelete by remember { mutableStateOf<AccountEntity?>(null) }
+    var twtPendingUnlockAccount by remember { mutableStateOf<AccountEntity?>(null) }
+
+    fun requestOpenAccount(account: AccountEntity) {
+        if (TwtAccountHelper.isTwtAccount(account) && activity != null && securityManager != null) {
+            twtPendingUnlockAccount = account
+        } else {
+            accountToEdit = account
+        }
+    }
 
     Scaffold(
         containerColor = theme.backgroundColor,
@@ -153,13 +164,24 @@ fun AccountsScreen(
                                 border = BorderStroke(1.dp, theme.metallicAccent.copy(alpha = 0.65f)),
                                 modifier = Modifier.testTag("twt_usd_hero_badge")
                             ) {
-                                Text(
-                                    text = "🪙 ${TwtAccountHelper.currentTwtAccountName()} : ${Currencies.format(twtUsdBalance, "USD")}",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = theme.onPrimaryColor,
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-                                )
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Lock,
+                                        contentDescription = null,
+                                        tint = theme.onPrimaryColor,
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "${TwtAccountHelper.currentTwtAccountName()} (USD $) : ${Currencies.format(twtUsdBalance, "USD")}",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = theme.onPrimaryColor
+                                    )
+                                }
                             }
                         }
 
@@ -264,15 +286,33 @@ fun AccountsScreen(
                 }
             }
 
-            // Accounts List sorted with Cash first, Card, Savings, Custom
+            // Accounts List sorted with Cash first, Card, Savings, Custom (slide-to-delete intentionally disabled)
             items(accounts, key = { it.id }) { account ->
                 AccountItemCard(
                     account = account,
-                    onEdit = { accountToEdit = account },
+                    onOpen = { requestOpenAccount(account) },
+                    onEdit = { requestOpenAccount(account) },
                     onDelete = { accountToDelete = account }
                 )
             }
         }
+    }
+
+    // TWT 2026 Biometric / 4-digit PIN Challenge Dialog
+    val pendingTwt = twtPendingUnlockAccount
+    if (pendingTwt != null && activity != null && securityManager != null) {
+        TwtSecurityChallengeDialog(
+            activity = activity,
+            securityManager = securityManager,
+            title = stringResource(R.string.twt_unlock_title),
+            subtitle = stringResource(R.string.twt_unlock_sub),
+            onAuthenticated = {
+                val acc = pendingTwt
+                twtPendingUnlockAccount = null
+                accountToEdit = acc
+            },
+            onDismiss = { twtPendingUnlockAccount = null }
+        )
     }
 
     // Add Account Sheet
@@ -335,18 +375,23 @@ fun AccountsScreen(
 @Composable
 fun AccountItemCard(
     account: AccountEntity,
+    onOpen: () -> Unit = {},
     onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     val theme = LocalArtisanTheme.current
     var showMenu by remember { mutableStateOf(false) }
+    val isTwt = TwtAccountHelper.isTwtAccount(account)
+    val displayName = if (isTwt) TwtAccountHelper.currentTwtAccountName() else account.name
 
     ArtisanCard(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onOpen() }
             .testTag("account_item_${account.id}"),
-        containerColor = theme.surfaceColor,
-        elevation = 2.dp
+        containerColor = if (isTwt) theme.surfaceElevatedColor else theme.surfaceColor,
+        border = if (isTwt) BorderStroke(1.5.dp, theme.metallicAccent) else null,
+        elevation = if (isTwt) 4.dp else 2.dp
     ) {
         Row(
             modifier = Modifier
@@ -359,7 +404,7 @@ fun AccountItemCard(
                 modifier = Modifier
                     .size(46.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(theme.primaryContainer),
+                    .background(if (isTwt) theme.metallicAccent.copy(alpha = 0.24f) else theme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Text(text = account.emojiAvatar, fontSize = 22.sp)
@@ -367,18 +412,49 @@ fun AccountItemCard(
 
             Spacer(modifier = Modifier.width(14.dp))
 
-            val isTwt = TwtAccountHelper.isTwtAccount(account)
-            val displayName = if (isTwt) TwtAccountHelper.currentTwtAccountName() else account.name
-
             // Details
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = displayName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = theme.primaryColor
-                )
-                Spacer(modifier = Modifier.height(2.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = displayName,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        color = theme.primaryColor
+                    )
+                    if (isTwt) {
+                        // Embossed lock badge for Private TWT 2026
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = theme.primaryColor,
+                            border = BorderStroke(1.dp, theme.metallicAccent),
+                            shadowElevation = 3.dp,
+                            modifier = Modifier.testTag("twt_embossed_lock_badge")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Lock,
+                                    contentDescription = stringResource(R.string.twt_private_badge),
+                                    tint = theme.metallicAccent,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Spacer(modifier = Modifier.width(3.dp))
+                                Text(
+                                    text = stringResource(R.string.twt_private_badge),
+                                    fontSize = 9.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = theme.onPrimaryColor
+                                )
+                            }
+                        }
+                    }
+                }
+                Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     val typeLabel = when (account.type) {
                         AccountType.CASH -> stringResource(R.string.type_cash)
@@ -403,7 +479,9 @@ fun AccountItemCard(
                         Spacer(modifier = Modifier.width(6.dp))
                         Surface(
                             shape = RoundedCornerShape(4.dp),
-                            color = theme.metallicAccent.copy(alpha = 0.2f)
+                            color = theme.metallicAccent.copy(alpha = 0.25f),
+                            border = BorderStroke(1.dp, theme.metallicAccent.copy(alpha = 0.8f)),
+                            modifier = Modifier.testTag("twt_usd_currency_badge")
                         ) {
                             Text(
                                 text = "USD ($)",
@@ -411,7 +489,7 @@ fun AccountItemCard(
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = theme.primaryColor,
-                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                             )
                         }
                     }
@@ -471,7 +549,11 @@ fun AccountEditSheet(
 
     var name by remember { mutableStateOf(account?.name ?: "") }
     var type by remember { mutableStateOf(account?.type ?: AccountType.CASH) }
-    var balanceText by remember { mutableStateOf(account?.balance?.toString() ?: "0.00") }
+    var balanceText by remember {
+        mutableStateOf(
+            account?.balance?.let { Currencies.toMoneyBigDecimal(it).toPlainString() } ?: "0.00"
+        )
+    }
     var currency by remember {
         mutableStateOf(
             if (TwtAccountHelper.isTwtAccount(account)) "USD"
@@ -480,6 +562,7 @@ fun AccountEditSheet(
     }
     var emojiAvatar by remember { mutableStateOf(account?.emojiAvatar ?: "💵") }
     var showEmojiDialog by remember { mutableStateOf(false) }
+    var balanceError by remember { mutableStateOf<String?>(null) }
     val isTwtLocked = TwtAccountHelper.isTwtAccountName(name)
 
     ModalBottomSheet(
@@ -656,7 +739,6 @@ fun AccountEditSheet(
                 }
             }
 
-
             // Account Type Selector
             Column {
                 Text(
@@ -699,8 +781,13 @@ fun AccountEditSheet(
             // Balance
             OutlinedTextField(
                 value = balanceText,
-                onValueChange = { balanceText = it },
+                onValueChange = {
+                    balanceText = it
+                    balanceError = null
+                },
                 label = { Text(stringResource(R.string.initial_balance)) },
+                isError = balanceError != null,
+                supportingText = balanceError?.let { err -> { Text(err) } },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -718,9 +805,17 @@ fun AccountEditSheet(
                 Spacer(modifier = Modifier.width(12.dp))
                 TextButton(
                     onClick = {
-                        val parsedBalance = balanceText.toDoubleOrNull() ?: 0.0
-                        val finalName = if (name.isBlank()) "Account" else name
-                        onSave(finalName, type, parsedBalance, currency, emojiAvatar)
+                        val parsedBd = if (balanceText.isBlank()) {
+                            BigDecimal.ZERO
+                        } else {
+                            Currencies.parseBigDecimal(balanceText)
+                        }
+                        if (parsedBd == null) {
+                            balanceError = "Veuillez entrer un solde numérique valide."
+                        } else {
+                            val finalName = if (name.isBlank()) "Account" else name.trim()
+                            onSave(finalName, type, Currencies.toMoneyBigDecimal(parsedBd.toDouble()).toDouble(), currency, emojiAvatar)
+                        }
                     }
                 ) {
                     Text(stringResource(R.string.save), fontWeight = FontWeight.Bold, color = theme.primaryColor)

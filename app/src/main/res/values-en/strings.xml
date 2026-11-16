@@ -147,10 +147,29 @@
     <string name="sign_in_with_passcode">Sign in with Passcode</string>
     <string name="switch_user">Switch User</string>
     <string name="admin_design_spec_title">App Details &amp; Design (.txt)</string>
-    <string name="admin_design_spec_sub">410bala@gmail.com • Auto-updated on changes</string>
+    <string name="admin_design_spec_sub">Admin • Auto-updated on changes</string>
     <string name="admin_design_spec_view">View .txt</string>
     <string name="admin_design_spec_share">Share .txt</string>
     <string name="admin_design_spec_copied">App .txt specification copied to clipboard</string>
+    <string name="admin_include_sensitive_ids">Include Sensitive IDs (DB &amp; Emails)</string>
+    <string name="twt_visibility_title">TWT Visible</string>
+    <string name="twt_visibility_sub">Requires Biometric or 4-digit PIN when enabling</string>
+    <string name="twt_unlock_title">Private TWT Access</string>
+    <string name="twt_unlock_sub">Biometric or 4-digit PIN verification required</string>
+    <string name="twt_unlock_confirm">Unlock</string>
+    <string name="twt_setup_pin_notice">Set a 4-digit PIN to protect TWT (general app lock remains disabled).</string>
+    <string name="twt_private_badge">PRIVATE</string>
+    <string name="fx_mode_toggle">FX / Remittance Mode ($ → CFA)</string>
+    <string name="fx_mode_sub">Deducts USD + Fee and credits Net CFA</string>
+    <string name="fx_amount_sent_usd">Amount Sent ($ USD)</string>
+    <string name="fx_fee_usd">Transfer Fee ($ USD)</string>
+    <string name="fx_exchange_rate">Exchange Rate (1 USD → CFA)</string>
+    <string name="fx_source_usd_account">Source USD ($) Account</string>
+    <string name="fx_dest_cfa_account">Destination CFA Account</string>
+    <string name="fx_net_received_cfa">Net Received (CFA)</string>
+    <string name="fx_total_deducted_usd">Total Deducted ($ USD)</string>
+    <string name="family_city_filters">Family &amp; City Filters</string>
+    <string name="filtered_cfa_total">Filtered Total (CFA)</string>
 
     <!-- UI Themes -->
     <string name="theme_selection">Artisan Leather Theme</string>

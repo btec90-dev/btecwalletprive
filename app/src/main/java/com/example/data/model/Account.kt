@@ -26,6 +26,87 @@ data class AccountEntity(
     val isDeleted: Boolean = false
 )
 
+object SeedAccountIds {
+    const val ESPEC_CFA = "seed_especes_cfa"
+    const val TAP_TAP_SEND = "seed_tap_tap_send"
+    const val MONEYGRAM = "seed_moneygram"
+    const val TRANSFERT = "seed_transfert"
+    const val CARTE_BANCAIRE = "seed_carte_bancaire"
+    const val TWT_2026 = "seed_twt_2026"
+
+    val ALL_IDS = setOf(
+        ESPEC_CFA,
+        TAP_TAP_SEND,
+        MONEYGRAM,
+        TRANSFERT,
+        CARTE_BANCAIRE,
+        TWT_2026
+    )
+
+    fun defaultSeedAccounts(now: Long = System.currentTimeMillis()): List<AccountEntity> = listOf(
+        AccountEntity(
+            id = ESPEC_CFA,
+            name = "Espèces (CFA)",
+            type = AccountType.CASH,
+            balance = 0.0,
+            currencyCode = "CFA",
+            emojiAvatar = "💵",
+            sortOrder = 0,
+            updatedAt = now
+        ),
+        AccountEntity(
+            id = CARTE_BANCAIRE,
+            name = "Carte Bancaire",
+            type = AccountType.CARD,
+            balance = 0.0,
+            currencyCode = "CFA",
+            emojiAvatar = "💳",
+            sortOrder = 1,
+            updatedAt = now
+        ),
+        AccountEntity(
+            id = TAP_TAP_SEND,
+            name = "Tap Tap Send",
+            type = AccountType.CUSTOM,
+            balance = 0.0,
+            currencyCode = "CFA",
+            emojiAvatar = "📲",
+            sortOrder = 2,
+            updatedAt = now
+        ),
+        AccountEntity(
+            id = MONEYGRAM,
+            name = "MoneyGram",
+            type = AccountType.CUSTOM,
+            balance = 0.0,
+            currencyCode = "CFA",
+            emojiAvatar = "💸",
+            sortOrder = 3,
+            updatedAt = now
+        ),
+        AccountEntity(
+            id = TRANSFERT,
+            name = "Transfert / Virement",
+            type = AccountType.CUSTOM,
+            balance = 0.0,
+            currencyCode = "CFA",
+            emojiAvatar = "🔄",
+            sortOrder = 4,
+            updatedAt = now
+        ),
+        AccountEntity(
+            id = TWT_2026,
+            name = TwtAccountHelper.currentTwtAccountName(),
+            type = AccountType.SAVINGS,
+            balance = 0.0,
+            currencyCode = "USD",
+            emojiAvatar = "🪙",
+            sortOrder = 5,
+            updatedAt = now
+        )
+    )
+}
+
 object TwtAccountHelper {
     fun currentYear(): Int = Calendar.getInstance().get(Calendar.YEAR)
 
@@ -38,10 +119,11 @@ object TwtAccountHelper {
             trimmed.contains("TWT", ignoreCase = true)
     }
 
-    fun isTwtAccount(account: AccountEntity?): Boolean = isTwtAccountName(account?.name)
+    fun isTwtAccount(account: AccountEntity?): Boolean =
+        account?.id == SeedAccountIds.TWT_2026 || isTwtAccountName(account?.name)
 
     fun normalizeTwtAccount(account: AccountEntity): AccountEntity {
-        if (!isTwtAccountName(account.name)) {
+        if (!isTwtAccount(account)) {
             val cleanCurrency = if (account.currencyCode.equals("FCFA", ignoreCase = true)) "CFA" else account.currencyCode
             return if (cleanCurrency != account.currencyCode) {
                 account.copy(currencyCode = cleanCurrency)
