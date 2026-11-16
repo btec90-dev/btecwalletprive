@@ -14,12 +14,15 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Before
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
+import java.net.HttpURLConnection
+import java.net.URL
 
 @RunWith(RobolectricTestRunner::class)
 @Config(manifest = Config.NONE)
@@ -32,7 +35,18 @@ abstract class FirestoreEmulatorTestBase {
 
     @Before
     open fun setUpFirebase() {
+        val emulatorAvailable = try {
+            java.net.Socket().use { s ->
+                s.connect(java.net.InetSocketAddress(EMULATOR_HOST, AUTH_PORT), 1500)
+                true
+            }
+        } catch (_: Exception) {
+            false
+        }
+        org.junit.Assume.assumeTrue("Firebase Auth and Firestore emulators not reachable locally", emulatorAvailable)
+
         val context = ApplicationProvider.getApplicationContext<Context>()
+
         val resId = context.resources.getIdentifier("firestore_database_id", "string", context.packageName)
         databaseId = if (resId != 0) context.getString(resId) else "ai-studio-android-balatecs-4baf2e8b-4fe1-4d7a-a144-fd45aa8e45ca"
 
@@ -64,18 +78,45 @@ abstract class FirestoreEmulatorTestBase {
 
     @After
     open fun tearDownFirebase() {
-        auth.signOut()
+        if (::auth.isInitialized) {
+            auth.signOut()
+        }
     }
 
-    protected suspend fun signInTestUser(email: String): String = withContext(Dispatchers.IO) {
+    protected suspend fun signInTestUser(email: String, markVerified: Boolean = true): String = withContext(Dispatchers.IO) {
         withTimeout(AUTH_TIMEOUT_MS) {
             val result = try {
                 auth.signInWithEmailAndPassword(email, DEFAULT_PASSWORD).await()
-            } catch (unused: FirebaseAuthInvalidUserException) {
+            } catch (_: FirebaseAuthInvalidUserException) {
                 auth.createUserWithEmailAndPassword(email, DEFAULT_PASSWORD).await()
             }
-            checkNotNull(result.user?.uid) { "User auth failed" }
+            val user = checkNotNull(result.user) { "User auth failed" }
+            if (markVerified && !user.isEmailVerified) {
+                markEmulatorEmailVerified(user.uid)
+                user.reload().await()
+                user.getIdToken(true).await()
+            }
+            user.uid
         }
+    }
+
+    private fun markEmulatorEmailVerified(uid: String) {
+        val url = URL("http://$EMULATOR_HOST:$AUTH_PORT/identitytoolkit.googleapis.com/v1/accounts:update?key=fake-api-key-for-emulator")
+        val conn = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer owner")
+            connectTimeout = 2500
+            readTimeout = 2500
+        }
+        val body = JSONObject().apply {
+            put("localId", uid)
+            put("emailVerified", true)
+        }.toString()
+        conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+        conn.inputStream.use { it.readBytes() }
+        conn.disconnect()
     }
 
     protected fun Throwable.unwrapFirestoreException(): FirebaseFirestoreException? {
@@ -93,6 +134,6 @@ abstract class FirestoreEmulatorTestBase {
         const val AUTH_PORT = 9099
         const val PROJECT_ID = "demo-no-project"
         const val DEFAULT_PASSWORD = "password123"
-        const val AUTH_TIMEOUT_MS = 5000L
+        const val AUTH_TIMEOUT_MS = 8000L
     }
 }

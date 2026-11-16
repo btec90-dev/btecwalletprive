@@ -105,12 +105,13 @@ fun CategoriesScreen(
                 Text(
                     text = "Ajoutez ou supprimez vos catégories personnalisées pour le grand livre.",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color.Gray
+                    color = theme.secondaryTextColor
                 )
             }
 
-            items(WalletCategories.ALL, key = { it.first }) { (name, icon) ->
-                val isDefault = name in listOf("Famille", "Transfert", "MoneyGram", "Tap Tap Send", "Bamako", "Abidjan", "TWT", "Food & Dining", "Shopping", "Housing & Rent", "Transportation", "Salary & Wages")
+            val allCategories = WalletCategories.combined(customCategories)
+            items(allCategories, key = { it.first }) { (name, icon) ->
+                val isDefault = name in WalletCategories.DEFAULT_NAMES
 
                 ArtisanCard(
                     modifier = Modifier.fillMaxWidth(),
@@ -145,7 +146,7 @@ fun CategoriesScreen(
                             Text(
                                 text = if (isDefault) "Catégorie standard" else "Catégorie personnalisée",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray
+                                color = theme.secondaryTextColor
                             )
                         }
 

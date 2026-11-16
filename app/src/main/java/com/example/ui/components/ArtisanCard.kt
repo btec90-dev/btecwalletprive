@@ -2,7 +2,6 @@ package com.example.ui.components
 
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -19,14 +18,14 @@ fun ArtisanCard(
     modifier: Modifier = Modifier,
     shape: Shape = RoundedCornerShape(18.dp),
     containerColor: Color = LocalArtisanTheme.current.surfaceColor,
-    contentColor: Color = LocalArtisanTheme.current.onPrimaryContainer,
-    elevation: Dp = 2.dp,
+    contentColor: Color = LocalArtisanTheme.current.onSurfaceColor,
+    elevation: Dp = 3.dp,
     showStitching: Boolean = true,
     border: BorderStroke? = null,
     content: @Composable () -> Unit
 ) {
     val theme = LocalArtisanTheme.current
-    val effectiveBorder = border ?: BorderStroke(1.dp, theme.cardBorderColor.copy(alpha = 0.6f))
+    val effectiveBorder = border ?: BorderStroke(1.dp, theme.cardBorderColor.copy(alpha = 0.75f))
 
     Card(
         modifier = modifier,
@@ -38,17 +37,22 @@ fun ArtisanCard(
         elevation = CardDefaults.cardElevation(defaultElevation = elevation),
         border = effectiveBorder
     ) {
+        val grainModifier = Modifier.artisanLeatherTexture(
+            baseColor = containerColor,
+            isDark = theme.isDark
+        )
+
         val stitchModifier = if (showStitching) {
-            Modifier.stitchedBorder(
-                stitchColor = theme.stitchingColor.copy(alpha = 0.55f),
+            grainModifier.stitchedBorder(
+                stitchColor = theme.stitchingColor.copy(alpha = 0.65f),
                 strokeWidth = 1.2.dp,
-                dashLength = 5.dp,
+                dashLength = 5.5.dp,
                 dashGap = 3.5.dp,
-                inset = 4.dp,
+                inset = 4.5.dp,
                 cornerRadius = 18.dp
             )
         } else {
-            Modifier
+            grainModifier
         }
 
         Box(modifier = stitchModifier) {

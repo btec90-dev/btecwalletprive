@@ -2,20 +2,22 @@
   "entities": {
     "Account": {
       "title": "Account",
-      "description": "User financial account (Cash, Bank, Taptap Send, MoneyGram, etc.)",
+      "description": "User financial account (Cash, Bank, Tap Tap Send, MoneyGram, or private TWT [Year])",
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique account ID" },
         "name": { "type": "string", "description": "Account name" },
-        "type": { "type": "string", "description": "Account type e.g. CASH, BANK, MOBILE_MONEY" },
+        "type": { "type": "string", "description": "Account type: CASH, CARD, SAVINGS, CUSTOM" },
         "balance": { "type": "number", "description": "Current balance" },
-        "currencyCode": { "type": "string", "description": "Currency code e.g. CFA, USD" },
-        "emojiAvatar": { "type": "string", "description": "Icon or emoji representation" },
-        "isDefault": { "type": "boolean", "description": "Whether this is default account" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+        "currencyCode": { "type": "string", "description": "Currency code: CFA or USD" },
+        "emojiAvatar": { "type": "string", "description": "Emoji icon" },
+        "sortOrder": { "type": "number", "description": "Display order" },
+        "isTwt": { "type": "boolean", "description": "Whether account belongs to private admin TWT" },
+        "updatedBy": { "type": "string", "description": "UID of updater" },
+        "clientUpdatedAt": { "type": "number", "description": "Client update epoch ms" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
-      "required": ["id", "name", "balance", "currencyCode"]
+      "required": ["id", "name", "type", "balance", "currencyCode", "updatedAt"]
     },
     "Transaction": {
       "title": "Transaction",
@@ -23,18 +25,20 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique transaction ID" },
-        "amount": { "type": "number", "description": "Transaction amount" },
-        "currencyCode": { "type": "string", "description": "Currency code e.g. CFA, USD" },
-        "type": { "type": "string", "description": "EXPENSE, INCOME, or TRANSFER" },
-        "category": { "type": "string", "description": "Transaction category" },
         "accountId": { "type": "string", "description": "Associated account ID" },
-        "note": { "type": "string", "description": "Memo or note" },
+        "type": { "type": "string", "description": "EXPENSE or INCOME" },
+        "amount": { "type": "number", "description": "Positive transaction amount" },
         "payee": { "type": "string", "description": "Payee or recipient name" },
-        "timestamp": { "type": "number", "description": "Epoch timestamp in ms" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+        "category": { "type": "string", "description": "Transaction category" },
+        "timestamp": { "type": "number", "description": "Transaction epoch timestamp ms" },
+        "notes": { "type": "string", "description": "Optional memo" },
+        "currencyCode": { "type": "string", "description": "Currency code: CFA or USD" },
+        "isTwt": { "type": "boolean", "description": "Whether transaction belongs to private TWT" },
+        "updatedBy": { "type": "string", "description": "UID of updater" },
+        "clientUpdatedAt": { "type": "number", "description": "Client update epoch ms" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
-      "required": ["id", "amount", "currencyCode", "type", "category", "accountId", "timestamp"]
+      "required": ["id", "accountId", "type", "amount", "payee", "category", "timestamp", "currencyCode", "updatedAt"]
     },
     "RecurringTransaction": {
       "title": "RecurringTransaction",
@@ -42,36 +46,66 @@
       "type": "object",
       "properties": {
         "id": { "type": "string", "description": "Unique recurring ID" },
-        "title": { "type": "string", "description": "Title/description" },
-        "amount": { "type": "number", "description": "Recurring amount" },
-        "currencyCode": { "type": "string", "description": "Currency code e.g. CFA, USD" },
-        "type": { "type": "string", "description": "EXPENSE or INCOME" },
-        "category": { "type": "string", "description": "Category" },
         "accountId": { "type": "string", "description": "Associated account ID" },
+        "type": { "type": "string", "description": "EXPENSE or INCOME" },
+        "amount": { "type": "number", "description": "Positive recurring amount" },
         "payee": { "type": "string", "description": "Payee name" },
+        "category": { "type": "string", "description": "Category" },
+        "currencyCode": { "type": "string", "description": "Currency code: CFA or USD" },
         "frequency": { "type": "string", "description": "DAILY, WEEKLY, MONTHLY, or YEARLY" },
         "startDate": { "type": "number", "description": "Start timestamp ms" },
-        "nextExecutionDate": { "type": "number", "description": "Next execution timestamp ms" },
-        "isActive": { "type": "boolean", "description": "Whether schedule is active" },
         "lastExecutedDate": { "type": "number", "description": "Last execution timestamp ms" },
-        "createdAt": { "type": "string", "format": "date-time", "description": "Creation timestamp" },
-        "updatedAt": { "type": "string", "format": "date-time", "description": "Update timestamp" }
+        "nextDueDate": { "type": "number", "description": "Next due timestamp ms" },
+        "isActive": { "type": "boolean", "description": "Whether schedule is active" },
+        "notes": { "type": "string", "description": "Optional notes" },
+        "updatedBy": { "type": "string", "description": "UID of updater" },
+        "clientUpdatedAt": { "type": "number", "description": "Client update epoch ms" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
       },
-      "required": ["id", "title", "amount", "currencyCode", "type", "category", "accountId", "frequency", "nextExecutionDate"]
+      "required": ["id", "accountId", "type", "amount", "payee", "category", "currencyCode", "frequency", "nextDueDate", "isActive", "updatedAt"]
+    },
+    "Category": {
+      "title": "Category",
+      "description": "Custom shared category definition",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Sanitized category document ID" },
+        "name": { "type": "string", "description": "Display category name" },
+        "icon": { "type": "string", "description": "Category emoji icon" },
+        "updatedBy": { "type": "string", "description": "UID of updater" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Server timestamp" }
+      },
+      "required": ["id", "name", "icon", "updatedAt"]
     }
   },
   "firestore": {
-    "/users/{userId}/accounts/{accountId}": {
+    "/shared_wallets/{walletId}/accounts/{accountId}": {
       "schema": "Account",
-      "description": "User financial accounts"
+      "description": "Shared non-TWT accounts synced between 410bala@gmail.com and traore200@gmail.com"
     },
-    "/users/{userId}/transactions/{transactionId}": {
+    "/shared_wallets/{walletId}/transactions/{transactionId}": {
       "schema": "Transaction",
-      "description": "User ledger transactions"
+      "description": "Shared non-TWT ledger transactions"
     },
-    "/users/{userId}/recurring/{recurringId}": {
+    "/shared_wallets/{walletId}/recurring/{recurringId}": {
       "schema": "RecurringTransaction",
-      "description": "User scheduled recurring transactions"
+      "description": "Shared non-TWT recurring transaction schedules"
+    },
+    "/shared_wallets/{walletId}/categories/{categoryId}": {
+      "schema": "Category",
+      "description": "Shared custom categories"
+    },
+    "/private_twt/{ownerKey}/accounts/{accountId}": {
+      "schema": "Account",
+      "description": "Private TWT [Year] account strictly restricted to primary admin (410bala@gmail.com)"
+    },
+    "/private_twt/{ownerKey}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Private TWT [Year] transactions strictly restricted to primary admin"
+    },
+    "/private_twt/{ownerKey}/recurring/{recurringId}": {
+      "schema": "RecurringTransaction",
+      "description": "Private TWT recurring schedules strictly restricted to primary admin"
     }
   }
 }

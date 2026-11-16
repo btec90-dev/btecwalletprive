@@ -38,9 +38,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.data.model.AccountEntity
 import com.example.data.model.Currencies
 import com.example.data.model.TransactionEntity
 import com.example.data.model.TransactionType
+import com.example.data.model.TwtAccountHelper
 import com.example.data.model.WalletCategories
 import com.example.ui.components.ArtisanCard
 import com.example.ui.components.CHART_PALETTE
@@ -57,13 +59,23 @@ import java.util.Locale
 @Composable
 fun AnalyticsScreen(
     transactions: List<TransactionEntity>,
-    baseCurrency: String
+    baseCurrency: String,
+    accounts: List<AccountEntity> = emptyList(),
+    customCategories: List<Pair<String, String>> = emptyList()
 ) {
     val theme = LocalArtisanTheme.current
+    val cfaTransactions = remember(transactions, accounts) {
+        if (accounts.isEmpty()) {
+            transactions.filter { !it.isDeleted }
+        } else {
+            val twtIds = accounts.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
+            transactions.filter { !it.isDeleted && it.accountId !in twtIds }
+        }
+    }
 
     // Categorical spending computation
-    val expenseCategories = remember(transactions) {
-        val expenseTx = transactions.filter { it.type == TransactionType.EXPENSE && !it.isDeleted }
+    val expenseCategories = remember(cfaTransactions) {
+        val expenseTx = cfaTransactions.filter { it.type == TransactionType.EXPENSE }
         val grouped = expenseTx.groupBy { it.category }
             .mapValues { entry -> entry.value.sumOf { it.amount } }
             .toList()
@@ -78,18 +90,17 @@ fun AnalyticsScreen(
         }
     }
 
-    val totalIncome = remember(transactions) {
-        transactions.filter { it.type == TransactionType.INCOME && !it.isDeleted }.sumOf { it.amount }
+    val totalIncome = remember(cfaTransactions) {
+        cfaTransactions.filter { it.type == TransactionType.INCOME }.sumOf { it.amount }
     }
-    val totalExpense = remember(transactions) {
-        transactions.filter { it.type == TransactionType.EXPENSE && !it.isDeleted }.sumOf { it.amount }
+    val totalExpense = remember(cfaTransactions) {
+        cfaTransactions.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
     }
     val netCashFlow = totalIncome - totalExpense
     val savingsRate = if (totalIncome > 0) ((totalIncome - totalExpense) / totalIncome * 100.0).coerceIn(0.0, 100.0) else 0.0
 
-    // Monthly trends computation (last 6 calendar months fitted cleanly across width)
-    val monthlyTrends = remember(transactions) {
-        val cal = Calendar.getInstance()
+    // Monthly trends computation (last 5 calendar months fitted cleanly across width)
+    val monthlyTrends = remember(cfaTransactions) {
         val monthFormat = SimpleDateFormat("MMM", Locale.getDefault())
         val monthKeyFormat = SimpleDateFormat("yyyy-MM", Locale.US)
 
@@ -100,15 +111,13 @@ fun AnalyticsScreen(
         }
 
         months.map { (key, display) ->
-            val inc = transactions.filter {
+            val inc = cfaTransactions.filter {
                 it.type == TransactionType.INCOME &&
-                !it.isDeleted &&
                 monthKeyFormat.format(Date(it.timestamp)) == key
             }.sumOf { it.amount }
 
-            val exp = transactions.filter {
+            val exp = cfaTransactions.filter {
                 it.type == TransactionType.EXPENSE &&
-                !it.isDeleted &&
                 monthKeyFormat.format(Date(it.timestamp)) == key
             }.sumOf { it.amount }
 
@@ -231,7 +240,7 @@ fun AnalyticsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = WalletCategories.getIcon(highestExpense.category),
+                            text = WalletCategories.getIcon(highestExpense.category, customCategories),
                             fontSize = 24.sp
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -239,7 +248,7 @@ fun AnalyticsScreen(
                             Text(
                                 text = stringResource(R.string.highest_expense),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray
+                                color = theme.secondaryTextColor
                             )
                             Text(
                                 text = highestExpense.category,

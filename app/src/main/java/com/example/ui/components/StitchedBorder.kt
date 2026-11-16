@@ -15,11 +15,11 @@ import androidx.compose.ui.unit.dp
 
 fun Modifier.stitchedBorder(
     stitchColor: Color,
-    strokeWidth: Dp = 1.5.dp,
-    dashLength: Dp = 6.dp,
-    dashGap: Dp = 4.dp,
-    inset: Dp = 5.dp,
-    cornerRadius: Dp = 16.dp
+    strokeWidth: Dp = 1.4.dp,
+    dashLength: Dp = 5.5.dp,
+    dashGap: Dp = 3.5.dp,
+    inset: Dp = 4.5.dp,
+    cornerRadius: Dp = 18.dp
 ): Modifier = this.drawBehind {
     val insetPx = inset.toPx()
     val strokePx = strokeWidth.toPx()
@@ -40,6 +40,20 @@ fun Modifier.stitchedBorder(
         )
     }
 
+    // Subtle recessed stitch shadow underneath thread
+    drawPath(
+        path = path,
+        color = Color.Black.copy(alpha = 0.14f),
+        style = Stroke(
+            width = strokePx + 0.8f,
+            pathEffect = PathEffect.dashPathEffect(
+                floatArrayOf(dashLength.toPx(), dashGap.toPx()),
+                0f
+            )
+        )
+    )
+
+    // Primary waxed metallic/linen stitch thread
     drawPath(
         path = path,
         color = stitchColor,

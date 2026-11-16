@@ -2,59 +2,222 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    function isAuthenticated() {
-      return request.auth != null;
+    // Default deny safety net
+    match /{document=**} {
+      allow read, write: if false;
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    function isVerifiedUser() {
+      return request.auth != null &&
+        request.auth.token.email_verified == true &&
+        request.auth.token.email is string;
     }
 
-    function isValidAccount(data) {
-      return data.name is string && data.name.size() > 0 &&
-             data.balance is number &&
-             data.currencyCode is string;
+    function isPrimaryAdmin() {
+      return isVerifiedUser() &&
+        request.auth.token.email == '410bala@gmail.com';
     }
 
-    function isValidTransaction(data) {
-      return data.amount is number && data.amount > 0 &&
-             data.currencyCode is string &&
-             data.type is string &&
-             data.category is string &&
-             data.accountId is string &&
-             data.timestamp is number;
+    function isSharedAuthorizedUser() {
+      return isVerifiedUser() &&
+        (request.auth.token.email == '410bala@gmail.com' ||
+         request.auth.token.email == 'traore200@gmail.com');
     }
 
-    function isValidRecurring(data) {
-      return data.title is string && data.title.size() > 0 &&
-             data.amount is number && data.amount > 0 &&
-             data.currencyCode is string &&
-             data.type is string &&
-             data.category is string &&
-             data.accountId is string &&
-             data.frequency is string &&
-             data.nextExecutionDate is number;
+    function incoming() {
+      return request.resource.data;
     }
 
-    match /users/{userId} {
-      allow read, write: if isOwner(userId);
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string &&
+        id.size() >= 1 &&
+        id.size() <= 128 &&
+        id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidSharedAccount(data, docId) {
+      return data.keys().hasAll(['id', 'name', 'type', 'balance', 'currencyCode', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'type', 'balance', 'currencyCode', 'emojiAvatar', 'sortOrder', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']) &&
+        isValidId(docId) &&
+        data.id == docId &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        !(data.name.lower().matches('.*twt.*')) &&
+        data.get('isTwt', false) == false &&
+        data.type in ['CASH', 'CARD', 'SAVINGS', 'CUSTOM'] &&
+        data.balance is number &&
+        data.currencyCode in ['CFA', 'USD'] &&
+        data.updatedAt is timestamp && data.updatedAt <= request.time &&
+        (!('emojiAvatar' in data) || (data.emojiAvatar is string && data.emojiAvatar.size() <= 16)) &&
+        (!('sortOrder' in data) || (data.sortOrder is number)) &&
+        (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128)) &&
+        (!('clientUpdatedAt' in data) || (data.clientUpdatedAt is number));
+    }
+
+    function isValidPrivateTwtAccount(data, docId) {
+      return data.keys().hasAll(['id', 'name', 'type', 'balance', 'currencyCode', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'type', 'balance', 'currencyCode', 'emojiAvatar', 'sortOrder', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']) &&
+        isValidId(docId) &&
+        data.id == docId &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 80 &&
+        data.type in ['CASH', 'CARD', 'SAVINGS', 'CUSTOM'] &&
+        data.balance is number &&
+        data.currencyCode == 'USD' &&
+        data.updatedAt is timestamp && data.updatedAt <= request.time &&
+        (!('emojiAvatar' in data) || (data.emojiAvatar is string && data.emojiAvatar.size() <= 16)) &&
+        (!('sortOrder' in data) || (data.sortOrder is number)) &&
+        (!('isTwt' in data) || data.isTwt is bool) &&
+        (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128)) &&
+        (!('clientUpdatedAt' in data) || (data.clientUpdatedAt is number));
+    }
+
+    function isValidTransaction(data, docId, allowTwt) {
+      return data.keys().hasAll(['id', 'accountId', 'type', 'amount', 'payee', 'category', 'timestamp', 'currencyCode', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'accountId', 'type', 'amount', 'payee', 'category', 'timestamp', 'notes', 'currencyCode', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']) &&
+        isValidId(docId) &&
+        data.id == docId &&
+        data.accountId is string && data.accountId.size() >= 1 && data.accountId.size() <= 128 &&
+        data.type in ['INCOME', 'EXPENSE'] &&
+        data.amount is number && data.amount > 0 &&
+        data.payee is string && data.payee.size() >= 1 && data.payee.size() <= 120 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.timestamp is number && data.timestamp > 0 &&
+        data.currencyCode in ['CFA', 'USD'] &&
+        (allowTwt || data.get('isTwt', false) == false) &&
+        data.updatedAt is timestamp && data.updatedAt <= request.time &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        (!('isTwt' in data) || data.isTwt is bool) &&
+        (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128)) &&
+        (!('clientUpdatedAt' in data) || (data.clientUpdatedAt is number));
+    }
+
+    function isValidRecurring(data, docId) {
+      return data.keys().hasAll(['id', 'accountId', 'type', 'amount', 'payee', 'category', 'currencyCode', 'frequency', 'nextDueDate', 'isActive', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'accountId', 'type', 'amount', 'payee', 'category', 'currencyCode', 'frequency', 'startDate', 'lastExecutedDate', 'nextDueDate', 'isActive', 'notes', 'updatedBy', 'clientUpdatedAt', 'updatedAt']) &&
+        isValidId(docId) &&
+        data.id == docId &&
+        data.accountId is string && data.accountId.size() >= 1 && data.accountId.size() <= 128 &&
+        data.type in ['INCOME', 'EXPENSE'] &&
+        data.amount is number && data.amount > 0 &&
+        data.payee is string && data.payee.size() >= 1 && data.payee.size() <= 120 &&
+        data.category is string && data.category.size() >= 1 && data.category.size() <= 80 &&
+        data.currencyCode in ['CFA', 'USD'] &&
+        data.frequency in ['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'] &&
+        data.nextDueDate is number &&
+        data.isActive is bool &&
+        data.updatedAt is timestamp && data.updatedAt <= request.time &&
+        (!('startDate' in data) || data.startDate is number) &&
+        (!('lastExecutedDate' in data) || data.lastExecutedDate is number) &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500)) &&
+        (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128)) &&
+        (!('clientUpdatedAt' in data) || (data.clientUpdatedAt is number));
+    }
+
+    function isValidCategory(data, docId) {
+      return data.keys().hasAll(['id', 'name', 'icon', 'updatedAt']) &&
+        data.keys().hasOnly(['id', 'name', 'icon', 'updatedBy', 'updatedAt']) &&
+        isValidId(docId) &&
+        data.id == docId &&
+        data.name is string && data.name.size() >= 1 && data.name.size() <= 64 &&
+        data.icon is string && data.icon.size() >= 1 && data.icon.size() <= 16 &&
+        data.updatedAt is timestamp && data.updatedAt <= request.time &&
+        (!('updatedBy' in data) || (data.updatedBy is string && data.updatedBy.size() <= 128));
+    }
+
+    // Shared Wallet Data (both 410bala@gmail.com and traore200@gmail.com; excludes TWT)
+    match /shared_wallets/{walletId} {
+      allow get: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
 
       match /accounts/{accountId} {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidAccount(request.resource.data);
-        allow delete: if isOwner(userId);
+        allow get, list: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
+        allow create: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidSharedAccount(incoming(), accountId);
+        allow update: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidSharedAccount(incoming(), accountId) &&
+          incoming().id == existing().id &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'type', 'balance', 'currencyCode', 'emojiAvatar', 'sortOrder', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
+        allow delete: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
       }
 
       match /transactions/{transactionId} {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidTransaction(request.resource.data);
-        allow delete: if isOwner(userId);
+        allow get, list: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
+        allow create: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidTransaction(incoming(), transactionId, false);
+        allow update: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidTransaction(incoming(), transactionId, false) &&
+          incoming().id == existing().id &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['accountId', 'type', 'amount', 'payee', 'category', 'timestamp', 'notes', 'currencyCode', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
+        allow delete: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
       }
 
       match /recurring/{recurringId} {
-        allow read: if isOwner(userId);
-        allow create, update: if isOwner(userId) && isValidRecurring(request.resource.data);
-        allow delete: if isOwner(userId);
+        allow get, list: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
+        allow create: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidRecurring(incoming(), recurringId);
+        allow update: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidRecurring(incoming(), recurringId) &&
+          incoming().id == existing().id &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['accountId', 'type', 'amount', 'payee', 'category', 'currencyCode', 'frequency', 'startDate', 'lastExecutedDate', 'nextDueDate', 'isActive', 'notes', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
+        allow delete: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
+      }
+
+      match /categories/{categoryId} {
+        allow get, list: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
+        allow create: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidCategory(incoming(), categoryId);
+        allow update: if isSharedAuthorizedUser() && walletId == 'balatec_shared' &&
+          isValidCategory(incoming(), categoryId) &&
+          incoming().id == existing().id &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'icon', 'updatedBy', 'updatedAt']);
+        allow delete: if isSharedAuthorizedUser() && walletId == 'balatec_shared';
+      }
+    }
+
+    // Strict TWT Isolation: Primary Admin ONLY (410bala@gmail.com)
+    match /private_twt/{ownerKey} {
+      allow get: if isPrimaryAdmin() && ownerKey == 'admin_only';
+
+      match /accounts/{accountId} {
+        allow get, list: if isPrimaryAdmin() && ownerKey == 'admin_only';
+        allow create: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
+          isValidPrivateTwtAccount(incoming(), accountId);
+        allow update: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
+          isValidPrivateTwtAccount(incoming(), accountId) &&
+          incoming().id == existing().id &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['name', 'type', 'balance', 'currencyCode', 'emojiAvatar', 'sortOrder', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
+        allow delete: if isPrimaryAdmin() && ownerKey == 'admin_only';
+      }
+
+      match /transactions/{transactionId} {
+        allow get, list: if isPrimaryAdmin() && ownerKey == 'admin_only';
+        allow create: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
+          isValidTransaction(incoming(), transactionId, true);
+        allow update: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
+          isValidTransaction(incoming(), transactionId, true) &&
+          incoming().id == existing().id &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['accountId', 'type', 'amount', 'payee', 'category', 'timestamp', 'notes', 'currencyCode', 'isTwt', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
+        allow delete: if isPrimaryAdmin() && ownerKey == 'admin_only';
+      }
+
+      match /recurring/{recurringId} {
+        allow get, list: if isPrimaryAdmin() && ownerKey == 'admin_only';
+        allow create: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
+          isValidRecurring(incoming(), recurringId);
+        allow update: if isPrimaryAdmin() && ownerKey == 'admin_only' &&
+          isValidRecurring(incoming(), recurringId) &&
+          incoming().id == existing().id &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['accountId', 'type', 'amount', 'payee', 'category', 'currencyCode', 'frequency', 'startDate', 'lastExecutedDate', 'nextDueDate', 'isActive', 'notes', 'updatedBy', 'clientUpdatedAt', 'updatedAt']);
+        allow delete: if isPrimaryAdmin() && ownerKey == 'admin_only';
       }
     }
   }

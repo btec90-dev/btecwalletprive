@@ -68,12 +68,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.example.R
 import com.example.data.model.AccountEntity
 import com.example.data.model.Currencies
 import com.example.data.model.RecurrenceFrequency
 import com.example.data.model.RecurringTransactionEntity
 import com.example.data.model.TransactionType
+import com.example.data.model.TwtAccountHelper
 import com.example.data.model.WalletCategories
 import com.example.ui.components.ArtisanCard
 import com.example.ui.theme.LocalArtisanTheme
@@ -86,6 +90,7 @@ import java.util.Locale
 fun RecurringTransactionsSheet(
     recurringList: List<RecurringTransactionEntity>,
     accounts: List<AccountEntity>,
+    customCategories: List<Pair<String, String>> = emptyList(),
     baseCurrency: String,
     onAddRecurring: (RecurringTransactionEntity) -> Unit,
     onToggleActive: (id: String, isActive: Boolean) -> Unit,
@@ -145,7 +150,7 @@ fun RecurringTransactionsSheet(
                         Text(
                             text = "Ajout automatique au grand livre",
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray
+                            color = theme.secondaryTextColor
                         )
                     }
                 }
@@ -243,6 +248,7 @@ fun RecurringTransactionsSheet(
                         RecurringItemCard(
                             item = item,
                             account = account,
+                            customCategories = customCategories,
                             baseCurrency = baseCurrency,
                             onToggleActive = { onToggleActive(item.id, it) },
                             onExecuteNow = {
@@ -261,6 +267,8 @@ fun RecurringTransactionsSheet(
     if (showAddRecurringForm) {
         AddRecurringFormSheet(
             accounts = accounts,
+            customCategories = customCategories,
+            baseCurrency = baseCurrency,
             onDismiss = { showAddRecurringForm = false },
             onSave = { entity ->
                 onAddRecurring(entity)
@@ -299,6 +307,7 @@ fun RecurringTransactionsSheet(
 fun RecurringItemCard(
     item: RecurringTransactionEntity,
     account: AccountEntity?,
+    customCategories: List<Pair<String, String>> = emptyList(),
     baseCurrency: String,
     onToggleActive: (Boolean) -> Unit,
     onExecuteNow: () -> Unit,
@@ -339,7 +348,7 @@ fun RecurringItemCard(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = WalletCategories.getIcon(item.category),
+                        text = WalletCategories.getIcon(item.category, customCategories),
                         fontSize = 20.sp
                     )
                 }
@@ -371,10 +380,15 @@ fun RecurringItemCard(
                             )
                         }
                         if (account != null) {
+                            val accDisplayName = if (TwtAccountHelper.isTwtAccount(account)) {
+                                TwtAccountHelper.currentTwtAccountName()
+                            } else {
+                                account.name
+                            }
                             Text(
-                                text = " • ${account.emojiAvatar} ${account.name}",
+                                text = " • ${account.emojiAvatar} $accDisplayName",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color.Gray,
+                                color = theme.secondaryTextColor,
                                 maxLines = 1
                             )
                         }
@@ -384,11 +398,10 @@ fun RecurringItemCard(
                 // Amount
                 val prefix = if (isIncome) "+" else "-"
                 val amountColor = if (isIncome) Color(0xFF2E7D32) else Color(0xFFC62828)
-                val currencyCode = account?.currencyCode ?: baseCurrency
 
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = "$prefix${Currencies.format(item.amount, currencyCode)}",
+                        text = "$prefix${Currencies.formatForAccount(item.amount, account, baseCurrency)}",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
                         color = amountColor
@@ -469,11 +482,14 @@ fun RecurringItemCard(
 @Composable
 fun AddRecurringFormSheet(
     accounts: List<AccountEntity>,
+    customCategories: List<Pair<String, String>> = emptyList(),
+    baseCurrency: String = "CFA",
     onDismiss: () -> Unit,
     onSave: (RecurringTransactionEntity) -> Unit
 ) {
     val theme = LocalArtisanTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
 
     var type by remember { mutableStateOf(TransactionType.EXPENSE) }
     var amountText by remember { mutableStateOf("") }
@@ -485,6 +501,10 @@ fun AddRecurringFormSheet(
     var accountId by remember {
         mutableStateOf(accounts.firstOrNull()?.id ?: "")
     }
+    val selectedAccount = accounts.firstOrNull { it.id == accountId }
+    val isTwtSelected = TwtAccountHelper.isTwtAccount(selectedAccount)
+    val effectiveCurrency = Currencies.effectiveCurrencyCode(selectedAccount, baseCurrency)
+    val allCategories = remember(customCategories) { WalletCategories.combined(customCategories) }
 
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var categoryExpanded by remember { mutableStateOf(false) }
@@ -498,8 +518,10 @@ fun AddRecurringFormSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .imePadding()
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 36.dp),
+                .padding(bottom = 128.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
@@ -561,11 +583,17 @@ fun AddRecurringFormSheet(
                 }
             }
 
-            // Amount Field
+            // Amount Field (strict $ prefix for TWT, CFA suffix otherwise)
             OutlinedTextField(
                 value = amountText,
                 onValueChange = { amountText = it; errorMessage = null },
-                label = { Text(stringResource(R.string.amount)) },
+                label = { Text("${stringResource(R.string.amount)} ($effectiveCurrency)") },
+                prefix = if (isTwtSelected || effectiveCurrency == "USD") {
+                    { Text("$ ", fontWeight = FontWeight.Bold, color = theme.primaryColor) }
+                } else null,
+                suffix = if (!isTwtSelected && effectiveCurrency == "CFA") {
+                    { Text(" CFA", fontWeight = FontWeight.SemiBold, color = theme.secondaryTextColor) }
+                } else null,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
@@ -585,7 +613,7 @@ fun AddRecurringFormSheet(
             // Category Picker
             Box(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
-                    value = "${WalletCategories.getIcon(category)} $category",
+                    value = "${WalletCategories.getIcon(category, customCategories)} $category",
                     onValueChange = {},
                     readOnly = true,
                     label = { Text(stringResource(R.string.category)) },
@@ -604,7 +632,7 @@ fun AddRecurringFormSheet(
                     expanded = categoryExpanded,
                     onDismissRequest = { categoryExpanded = false }
                 ) {
-                    WalletCategories.ALL.forEach { (catName, icon) ->
+                    allCategories.forEach { (catName, icon) ->
                         DropdownMenuItem(
                             text = { Text("$icon $catName") },
                             onClick = {
@@ -617,10 +645,13 @@ fun AddRecurringFormSheet(
             }
 
             // Account Picker
-            val selectedAccount = accounts.firstOrNull { it.id == accountId }
             Box(modifier = Modifier.fillMaxWidth()) {
                 OutlinedTextField(
-                    value = selectedAccount?.let { "${it.emojiAvatar} ${it.name} (${it.currencyCode})" } ?: stringResource(R.string.select_account),
+                    value = selectedAccount?.let {
+                        val dispName = if (TwtAccountHelper.isTwtAccount(it)) TwtAccountHelper.currentTwtAccountName() else it.name
+                        val dispCur = if (TwtAccountHelper.isTwtAccount(it)) "$ USD" else Currencies.effectiveCurrencyCode(it, baseCurrency)
+                        "${it.emojiAvatar} $dispName ($dispCur)"
+                    } ?: stringResource(R.string.select_account),
                     onValueChange = {},
                     readOnly = true,
                     label = { Text(stringResource(R.string.select_account)) },
@@ -640,10 +671,15 @@ fun AddRecurringFormSheet(
                     onDismissRequest = { accountExpanded = false }
                 ) {
                     accounts.forEach { acc ->
+                        val dispName = if (TwtAccountHelper.isTwtAccount(acc)) TwtAccountHelper.currentTwtAccountName() else acc.name
                         DropdownMenuItem(
-                            text = { Text("${acc.emojiAvatar} ${acc.name} (${Currencies.format(acc.balance, acc.currencyCode)})") },
+                            text = { Text("${acc.emojiAvatar} $dispName (${Currencies.formatForAccount(acc.balance, acc, baseCurrency)})") },
                             onClick = {
                                 accountId = acc.id
+                                if (TwtAccountHelper.isTwtAccount(acc)) {
+                                    category = "Bonus"
+                                    type = TransactionType.INCOME
+                                }
                                 accountExpanded = false
                             }
                         )

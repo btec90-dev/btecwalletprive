@@ -61,14 +61,22 @@ interface WalletDao {
     @Query("UPDATE transactions SET isDeleted = 1, updatedAt = :timestamp WHERE accountId = :accountId")
     suspend fun markTransactionsDeletedForAccount(accountId: String, timestamp: Long = System.currentTimeMillis())
 
+    @Query("SELECT * FROM transactions WHERE isDeleted = 1")
+    suspend fun getDeletedTransactionsList(): List<TransactionEntity>
+
+    @Query("DELETE FROM transactions WHERE id = :id")
+    suspend fun hardDeleteTransaction(id: String)
+
     @Upsert
     suspend fun upsertTransactions(transactions: List<TransactionEntity>)
+
 
     @Query("DELETE FROM accounts")
     suspend fun clearAccounts()
 
     @Query("DELETE FROM transactions")
     suspend fun clearTransactions()
+
 
     // Contacts / Saved Payees
     @Query("SELECT * FROM contacts WHERE isDeleted = 0 ORDER BY name ASC")

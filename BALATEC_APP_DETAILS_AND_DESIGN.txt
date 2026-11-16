@@ -1,0 +1,152 @@
+================================================================================
+BALATEC SECURE WALLET — COMPLETE APP CONTENTS, ARCHITECTURE & DESIGN SPECIFICATION
+================================================================================
+Maintained For : 410bala@gmail.com (Primary Admin)
+App Name       : Balatec Secure Wallet
+Package / ID   : com.aistudio.balatecwallet.kzrqmv (namespace: com.example)
+Version        : 3.0 (versionCode 3) | Min SDK: 24 | Target/Compile SDK: 36
+Platform       : Android (Kotlin + Jetpack Compose + Material Design 3)
+Auto-Sync Copy : Available inside Settings when signed in as 410bala@gmail.com
+                 (auto-regenerated & saved locally on every app/data change)
+
+--------------------------------------------------------------------------------
+1. VISUAL DESIGN SYSTEM & ARTISAN LEATHER AESTHETIC
+--------------------------------------------------------------------------------
+Core Aesthetic : Skeuomorphic Artisan Leather & Metallic Hardware
+Brand Emblem   : Circular Gold Medallion Coin (R.drawable.ic_balatec_coin)
+                 - Used for adaptive launcher icon (res/mipmap-*)
+                 - Splash overlay (#170E07 background, 120dp circle, #D4AF37 gold rim,
+                   650ms fade-out, "BALATEC SECURE WALLET" #E6C875)
+                 - TopAppBar header emblem (36dp circle with metallicAccent border)
+                 - Settings Profile avatar (54dp circle) & AuthGateBottomSheet emblem
+Edge-to-Edge   : enableEdgeToEdge() in MainActivity with Material 3 Scaffold insets
+Leather Texture: Zero-bitmap Compose drawWithCache modifiers (ui/components/LeatherTexture.kt):
+                 - Modifier.artisanLeatherTexture on ArtisanCard (multi-tone hide sheen, deterministic pebble grain, faint creases)
+                 - Modifier.artisanNavigationBarLeather on NavigationBar (leather texture + metallic top trim & waxed saddle-stitch seam)
+
+Material 3 Shapes (BalatecShapes in ui/theme/Theme.kt):
+- extraSmall : RoundedCornerShape(6.dp)
+- small      : RoundedCornerShape(10.dp)
+- medium     : RoundedCornerShape(16.dp)
+- large      : RoundedCornerShape(20.dp)
+- extraLarge : RoundedCornerShape(26.dp)
+
+Typography (ui/theme/Type.kt):
+- displaySmall   : Serif, Bold, 32sp / 38sp line, -0.25sp letter spacing
+- headlineLarge  : SansSerif, ExtraBold, 30sp / 36sp line, tnum (tabular numerals)
+- headlineMedium : SansSerif, Bold, 24sp / 30sp line, tnum
+- titleLarge     : SansSerif, Bold, 20sp / 26sp line
+- titleMedium    : SansSerif, SemiBold, 16sp / 22sp line
+- bodyLarge      : SansSerif, Normal, 15sp / 22sp line
+- bodyMedium     : SansSerif, Normal, 14sp / 20sp line
+- bodySmall      : SansSerif, Normal, 12sp / 16sp line
+- labelLarge     : SansSerif, Bold, 14sp / 20sp line
+- labelMedium    : SansSerif, SemiBold, 12sp / 16sp line
+- labelSmall     : SansSerif, Medium, 11sp / 14sp line
+
+10 Skeuomorphic Leather Themes (ui/theme/ArtisanThemes.kt & Color.kt):
+[Classic Collection - 5]
+1. Classic Saddle Tan (id: classic_saddle_tan) | Hardware: Brushed Brass (#C89D54)
+   Primary: #7B4B27 | Container: #F2E2CE | Surface: #FFFFFAF4 | Bg: #EFE1D0 | Border: #CFA97E
+2. Espresso Brown [Default] (id: espresso_brown) | Hardware: Aged Bronze (#A97442)
+   Primary: #3B231A | Container: #ECE2DC | Surface: #FFFFFBF8 | Bg: #EDE2DA | Border: #BC9E8C
+3. Midnight Black [Dark] (id: midnight_black) | Hardware: Brushed Steel (#A6B4C4)
+   Primary: #2F353E | Container: #272B32 | Surface: #FF1E2127 | Bg: #131519 | Border: #424954
+4. Vintage Slate Gray (id: vintage_slate_gray) | Hardware: Pewter Gunmetal (#8C96A1)
+   Primary: #434B54 | Container: #E5E8EC | Surface: #FFFCFCFD | Bg: #E9ECEF | Border: #B5BDC5
+5. Warm Caramel (id: warm_caramel) | Hardware: Antique Gold (#C59B42)
+   Primary: #96612F | Container: #F6EAD9 | Surface: #FFFFFCF7 | Bg: #F4EBDD | Border: #D8BE98
+
+[Bold / Luxury Collection - 5]
+6. Oxblood Burgundy (id: oxblood_burgundy) | Hardware: Champagne Gold (#D4B475)
+   Primary: #5E1924 | Container: #F5E2E5 | Surface: #FFFFFAFA | Bg: #F3E6E8 | Border: #D5A9B0
+7. British Racing Green (id: british_racing_green) | Hardware: Polished Brass (#D2AE48)
+   Primary: #174030 | Container: #DFECE6 | Surface: #FFFAFDFB | Bg: #E8F0EC | Border: #A9C7B9
+8. Cognac Amber (id: cognac_amber) | Hardware: Warm Copper (#CC7D49)
+   Primary: #9C4B1A | Container: #F7E5D8 | Surface: #FFFFFAF5 | Bg: #F4E6D9 | Border: #D9AE8F
+9. Navy Blue (id: navy_blue) | Hardware: Satin Nickel (#9AB0C6)
+   Primary: #162C4B | Container: #E0E8F3 | Surface: #FFFAFBFD | Bg: #E9EFF6 | Border: #AABBD2
+10. Ivory White Leather (id: ivory_white_leather) | Hardware: Champagne Gold (#D4B475)
+   Primary: #4D3B2C | Container: #F2ECE1 | Surface: #FFFFFFFF | Bg: #F5F1E8 | Border: #D6C6AE
+
+--------------------------------------------------------------------------------
+2. APP STRUCTURE, SCREENS & NAVIGATION
+--------------------------------------------------------------------------------
+Top Header Bar:
+- Left/Center: Circular gold Balatec medallion + "Balatec Secure Wallet" title
+- Right: Live Sync status badge ("Synced HH:mm" green pill / "Sync..." blue / "Local" neutral)
+
+4 Bottom Navigation Tabs (MainActivity.kt):
+1. Grand Livre / Ledger (LedgerScreen.kt)
+   - Transaction list with search bar, type/category/amount/date-range filters, batch select/delete
+   - Embedded Analytics summary modal/panel (AnalyticsScreen.kt - CFA totals excluding TWT USD)
+   - Recurring Transactions schedule sheet (RecurringTransactionsSheet.kt)
+   - Add / Edit Transaction Modal Bottom Sheet:
+     * Quick-Add TWT [Year] ($) shortcut (Admin only, auto-sets Bonus + INCOME + USD $)
+     * Account selector + inline Quick-Create Account (Tap Tap Send, MoneyGram, Transfert presets)
+     * 21 Preset Family Contacts quick-chips & Payee autocomplete
+     * Interactive Calendar Picker Modal (EN/FR localized, Today/Yesterday pills, timezone-safe local YYYY-MM-DD)
+     * Keyboard-aware scroll with imePadding + BringIntoViewRequester
+2. Comptes / Accounts (AccountsScreen.kt)
+   - Net Worth CFA Hero Card + Income/Expense summary
+   - Dedicated TWT [Year] USD ($) Hero Badge (Admin 410bala@gmail.com only)
+   - Smart Accounts sorted by priority: CASH -> CARD -> SAVINGS -> CUSTOM
+   - Slide-to-delete disabled to prevent accidental deletion; Edit & Delete via explicit 3-dot menu + confirmation dialog
+   - Account Edit Sheet with Tap Tap Send / MoneyGram / Transfert presets & strict USD ($) lock on TWT
+3. Catégories / Categories (CategoriesScreen.kt)
+   - 21 default categories (including Bonus, Famille, Transfert, MoneyGram, Tap Tap Send, Bamako, Abidjan)
+   - Custom category creation (name + emoji icon) and deletion, synced across devices
+4. Paramètres / Settings (SettingsScreen.kt)
+   - User Profile & Role Card (Active email, role badge, Login / Switch User / Disconnect)
+   - Admin-Only App Details & Design (.txt) Card (410bala@gmail.com only; live view, copy & share .txt)
+   - 10-Theme Artisan Leather Swatch Grid
+   - Cloud Backup & Multi-Device Sync Card (Firestore real-time sync toggle, Google Sign-In, Sync Now)
+   - Security & PIN Lock (4-digit PIN + Android BiometricPrompt)
+   - Base Currency Selector (CFA / USD)
+   - Language Switcher (Français / English)
+   - Export & Import Dialog (ExportImportDialog.kt):
+     * Flexible PDF Export (PdfReportExporter.kt): Filter by All, Account, Payee, Category, Date Range, Income/Expense
+     * JSON Backup Export/Import & CSV Ledger Export
+   - Clear All Transactions confirmation dialog
+
+--------------------------------------------------------------------------------
+3. CURRENCY, TWT & DATA PERSISTENCE RULES
+--------------------------------------------------------------------------------
+Currencies (data/model/Currency.kt):
+- Supported: USD ($) and CFA ("#,##0.00 CFA" — never "FCFA"; legacy FCFA/XOF automatically normalized to CFA)
+- TWT Dynamic Rules (TwtAccountHelper in data/model/Account.kt):
+  * Any account containing "TWT" dynamically normalizes to "TWT <CurrentYear>" (e.g., TWT 2026)
+  * Type: SAVINGS | Avatar: 🪙 | Currency strictly locked to USD ($)
+  * Selecting TWT auto-defaults category to "Bonus"
+
+Local Database (Room - WalletDatabase.kt):
+- Tables: accounts, transactions, recurring_transactions, contacts
+- Custom categories persisted in SharedPreferences & synced to Firestore
+
+Cloud Sync & Firestore Isolation (firestore.rules & CloudSyncManager.kt):
+- Database ID: ai-studio-android-balatecs-4baf2e8b-4fe1-4d7a-a144-fd45aa8e45ca
+- Shared Data (both 410bala@gmail.com & traore200@gmail.com):
+  * shared_wallets/balatec_shared/{accounts, transactions, recurring, categories}
+  * Strictly forbids TWT accounts/transactions (rejected by rules & client filters)
+- Private TWT Data (410bala@gmail.com Primary Admin ONLY):
+  * private_twt/admin_only/{accounts, transactions, recurring}
+  * Completely hidden from traore200@gmail.com across sync, UI, totals, Quick-Add, and PDF/JSON/CSV exports
+
+--------------------------------------------------------------------------------
+4. SECURITY, AUTHENTICATION & ACCESS CONTROL
+--------------------------------------------------------------------------------
+Authorized Accounts (security/AccessControlManager.kt):
+- Primary Admin  : 410bala@gmail.com  (Full access + Private TWT + Admin App Spec)
+- Secondary User : traore200@gmail.com (Shared non-TWT read/write access only; TWT hidden)
+- All other emails or unverified Firebase tokens are rejected by both client and Firestore rules.
+
+Authentication Methods:
+- Google Sign-In via Jetpack CredentialManager (GetSignInWithGoogleOption / GetGoogleIdOption) + Firebase Auth
+- Authorized Email + Case-Sensitive Passcode Switcher (validated via BuildConfig.ADMIN_PASSCODE / SECONDARY_PASSCODE from AI Studio Secrets; never hardcoded)
+- Local Lock Screen (LockScreen.kt): 4-digit PIN + BiometricPrompt (USE_BIOMETRIC)
+
+Permissions (AndroidManifest.xml):
+- android.permission.INTERNET
+- android.permission.VIBRATE
+- android.permission.USE_BIOMETRIC
+================================================================================

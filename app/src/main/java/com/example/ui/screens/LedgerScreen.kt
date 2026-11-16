@@ -7,7 +7,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
@@ -20,9 +22,12 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -30,15 +35,28 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.runtime.mutableIntStateOf
+
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.ui.focus.onFocusEvent
+import kotlinx.coroutines.launch
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.Repeat
@@ -46,6 +64,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SelectAll
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CheckboxDefaults
@@ -56,14 +75,17 @@ import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
+import com.example.data.model.AccountType
 import com.example.data.model.RecurrenceFrequency
 import com.example.data.model.RecurringTransactionEntity
+import com.example.data.model.TwtAccountHelper
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SuggestionChip
@@ -78,10 +100,12 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -121,11 +145,14 @@ fun LedgerScreen(
     transactions: List<TransactionEntity>,
     accounts: List<AccountEntity>,
     recurringList: List<RecurringTransactionEntity> = emptyList(),
+    customCategories: List<Pair<String, String>> = emptyList(),
     baseCurrency: String,
+    isAdminTwtVisible: Boolean = false,
     onAddTransaction: (TransactionEntity) -> Unit,
     onUpdateTransaction: (oldTx: TransactionEntity, newTx: TransactionEntity) -> Unit,
     onDeleteTransaction: (TransactionEntity) -> Unit,
     onDeleteTransactions: (List<TransactionEntity>) -> Unit = { list -> list.forEach { onDeleteTransaction(it) } },
+    onQuickCreateAccount: (name: String, type: AccountType, balance: Double, currency: String, emoji: String, onCreated: (String) -> Unit) -> Unit = { _, _, _, _, _, _ -> },
     onAddRecurring: (RecurringTransactionEntity) -> Unit = {},
     onToggleRecurringActive: (id: String, active: Boolean) -> Unit = { _, _ -> },
     onExecuteRecurringNow: (id: String) -> Unit = {},
@@ -151,6 +178,7 @@ fun LedgerScreen(
 
     var showFilterSheet by remember { mutableStateOf(false) }
     var showAddSheet by remember { mutableStateOf(false) }
+    var showQuickTwtSheet by remember { mutableStateOf(false) }
     var showRecurringSheet by remember { mutableStateOf(false) }
     var txToEdit by remember { mutableStateOf<TransactionEntity?>(null) }
     var txToDelete by remember { mutableStateOf<TransactionEntity?>(null) }
@@ -473,6 +501,57 @@ fun LedgerScreen(
                         }
                     }
 
+                    // Quick Add TWT Shortcut Button (STRICTLY visible to Primary Admin ONLY)
+                    if (isAdminTwtVisible && accounts.any { TwtAccountHelper.isTwtAccount(it) }) {
+                        Surface(
+                            onClick = { showQuickTwtSheet = true },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .testTag("btn_quick_add_twt"),
+                            shape = RoundedCornerShape(12.dp),
+                            color = theme.primaryColor,
+                            border = BorderStroke(1.dp, theme.metallicAccent.copy(alpha = 0.85f)),
+                            shadowElevation = 2.dp
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        Icons.Default.Bolt,
+                                        contentDescription = null,
+                                        tint = theme.metallicAccent,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = stringResource(R.string.quick_add_twt, TwtAccountHelper.currentTwtAccountName()),
+                                        color = theme.onPrimaryColor,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                }
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color.Black.copy(alpha = 0.22f)
+                                ) {
+                                    Text(
+                                        text = "$ USD • Bonus",
+                                        color = theme.metallicAccent,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
                     // Active Accounts Total row on top of the main screen (only show accounts with activities)
                     val activeAccounts = remember(accounts, transactions) {
                         accounts.filter { acc ->
@@ -513,13 +592,13 @@ fun LedgerScreen(
                                         Spacer(modifier = Modifier.width(6.dp))
                                         Column {
                                             Text(
-                                                text = acc.name,
+                                                text = if (TwtAccountHelper.isTwtAccount(acc)) TwtAccountHelper.currentTwtAccountName() else acc.name,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.SemiBold,
                                                 color = if (isSelectedAcc) theme.onPrimaryColor else theme.primaryColor
                                             )
                                             Text(
-                                                text = Currencies.format(acc.balance, acc.currencyCode),
+                                                text = Currencies.formatForAccount(acc.balance, acc),
                                                 fontSize = 12.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = if (isSelectedAcc) theme.onPrimaryColor else if (acc.balance >= 0) Color(0xFF2E7D32) else Color(0xFFC62828)
@@ -680,10 +759,10 @@ fun LedgerScreen(
                             val isSelected = selectedIds.contains(tx.id)
 
                             if (isSelectionMode) {
-                                // Selection mode row: clicking toggles selection
                                 TransactionSelectableCard(
                                     transaction = tx,
                                     account = account,
+                                    customCategories = customCategories,
                                     baseCurrency = baseCurrency,
                                     isSelected = isSelected,
                                     onToggleSelect = {
@@ -692,10 +771,10 @@ fun LedgerScreen(
                                     }
                                 )
                             } else {
-                                // Normal mode: Slide to delete gesture enabled
                                 SwipeToDeleteTransaction(
                                     transaction = tx,
                                     account = account,
+                                    customCategories = customCategories,
                                     baseCurrency = baseCurrency,
                                     onEdit = { txToEdit = tx },
                                     onDelete = { onDeleteTransaction(tx) },
@@ -826,16 +905,24 @@ fun LedgerScreen(
     }
 
     // Add Transaction Sheet
-    if (showAddSheet) {
+    if (showAddSheet || showQuickTwtSheet) {
+        val isQuickTwt = showQuickTwtSheet
         TransactionFormSheet(
             transaction = null,
             accounts = accounts,
+            customCategories = customCategories,
             baseCurrency = baseCurrency,
-            onDismiss = { showAddSheet = false },
+            initialTwtMode = isQuickTwt,
+            onDismiss = {
+                showAddSheet = false
+                showQuickTwtSheet = false
+            },
             onSave = { newTx ->
                 onAddTransaction(newTx)
                 showAddSheet = false
+                showQuickTwtSheet = false
             },
+            onQuickCreateAccount = onQuickCreateAccount,
             onScheduleRecurring = { newRec ->
                 onAddRecurring(newRec)
             }
@@ -847,12 +934,15 @@ fun LedgerScreen(
         TransactionFormSheet(
             transaction = oldTx,
             accounts = accounts,
+            customCategories = customCategories,
             baseCurrency = baseCurrency,
+            initialTwtMode = false,
             onDismiss = { txToEdit = null },
             onSave = { updatedTx ->
                 onUpdateTransaction(oldTx, updatedTx)
                 txToEdit = null
-            }
+            },
+            onQuickCreateAccount = onQuickCreateAccount
         )
     }
 
@@ -886,6 +976,7 @@ fun LedgerScreen(
             minAmount = minAmountFilter,
             maxAmount = maxAmountFilter,
             accounts = accounts,
+            customCategories = customCategories,
             onApply = { cat, acc, min, max ->
                 selectedCategoryFilter = cat
                 selectedAccountFilter = acc
@@ -902,6 +993,7 @@ fun LedgerScreen(
         RecurringTransactionsSheet(
             recurringList = recurringList,
             accounts = accounts,
+            customCategories = customCategories,
             baseCurrency = baseCurrency,
             onAddRecurring = { newRec ->
                 onAddRecurring(newRec)
@@ -920,6 +1012,7 @@ fun LedgerScreen(
 fun SwipeToDeleteTransaction(
     transaction: TransactionEntity,
     account: AccountEntity?,
+    customCategories: List<Pair<String, String>> = emptyList(),
     baseCurrency: String,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -972,6 +1065,7 @@ fun SwipeToDeleteTransaction(
         TransactionItemCard(
             transaction = transaction,
             account = account,
+            customCategories = customCategories,
             baseCurrency = baseCurrency,
             onEdit = onEdit,
             onDelete = onDelete,
@@ -984,6 +1078,7 @@ fun SwipeToDeleteTransaction(
 fun TransactionSelectableCard(
     transaction: TransactionEntity,
     account: AccountEntity?,
+    customCategories: List<Pair<String, String>> = emptyList(),
     baseCurrency: String,
     isSelected: Boolean,
     onToggleSelect: () -> Unit
@@ -1018,7 +1113,6 @@ fun TransactionSelectableCard(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Category Icon Badge
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -1027,14 +1121,13 @@ fun TransactionSelectableCard(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = WalletCategories.getIcon(transaction.category),
+                    text = WalletCategories.getIcon(transaction.category, customCategories),
                     fontSize = 18.sp
                 )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Details
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = transaction.payee,
@@ -1051,8 +1144,9 @@ fun TransactionSelectableCard(
                         color = Color.Gray
                     )
                     if (account != null) {
+                        val accDisplayName = if (TwtAccountHelper.isTwtAccount(account)) TwtAccountHelper.currentTwtAccountName() else account.name
                         Text(
-                            text = " • ${account.emojiAvatar} ${account.name}",
+                            text = " • ${account.emojiAvatar} $accDisplayName",
                             style = MaterialTheme.typography.labelSmall,
                             color = theme.stitchingColor,
                             maxLines = 1
@@ -1061,13 +1155,11 @@ fun TransactionSelectableCard(
                 }
             }
 
-            // Amount
             val prefix = if (isIncome) "+" else "-"
             val amountColor = if (isIncome) Color(0xFF2E7D32) else Color(0xFFC62828)
-            val currencyCode = account?.currencyCode ?: baseCurrency
 
             Text(
-                text = "$prefix${Currencies.format(transaction.amount, currencyCode)}",
+                text = "$prefix${Currencies.formatForAccount(transaction.amount, account, baseCurrency)}",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
                 color = amountColor
@@ -1080,6 +1172,7 @@ fun TransactionSelectableCard(
 fun TransactionItemCard(
     transaction: TransactionEntity,
     account: AccountEntity?,
+    customCategories: List<Pair<String, String>> = emptyList(),
     baseCurrency: String,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
@@ -1105,7 +1198,6 @@ fun TransactionItemCard(
                 .padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Category Icon Badge
             Box(
                 modifier = Modifier
                     .size(44.dp)
@@ -1116,14 +1208,13 @@ fun TransactionItemCard(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = WalletCategories.getIcon(transaction.category),
+                    text = WalletCategories.getIcon(transaction.category, customCategories),
                     fontSize = 20.sp
                 )
             }
 
             Spacer(modifier = Modifier.width(12.dp))
 
-            // Transaction Details
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = transaction.payee,
@@ -1140,8 +1231,9 @@ fun TransactionItemCard(
                         color = Color.Gray
                     )
                     if (account != null) {
+                        val accDisplayName = if (TwtAccountHelper.isTwtAccount(account)) TwtAccountHelper.currentTwtAccountName() else account.name
                         Text(
-                            text = " • ${account.emojiAvatar} ${account.name}",
+                            text = " • ${account.emojiAvatar} $accDisplayName",
                             style = MaterialTheme.typography.labelSmall,
                             color = theme.stitchingColor,
                             maxLines = 1
@@ -1168,14 +1260,12 @@ fun TransactionItemCard(
 
             Spacer(modifier = Modifier.width(8.dp))
 
-            // Amount
             val prefix = if (isIncome) "+" else "-"
             val amountColor = if (isIncome) Color(0xFF2E7D32) else Color(0xFFC62828)
-            val currencyCode = account?.currencyCode ?: baseCurrency
 
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = "$prefix${Currencies.format(transaction.amount, currencyCode)}",
+                    text = "$prefix${Currencies.formatForAccount(transaction.amount, account, baseCurrency)}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = amountColor
@@ -1218,65 +1308,374 @@ fun TransactionItemCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun CalendarPickerModal(
+    selectedDateYmd: String,
+    onDateSelected: (String) -> Unit,
+    onDismissRequest: () -> Unit
+) {
+    val theme = LocalArtisanTheme.current
+    val parts = remember(selectedDateYmd) {
+        selectedDateYmd.split("-").mapNotNull { it.toIntOrNull() }
+    }
+    val selYear = if (parts.size == 3) parts[0] else Calendar.getInstance().get(Calendar.YEAR)
+    val selMonth = if (parts.size == 3) parts[1] - 1 else Calendar.getInstance().get(Calendar.MONTH)
+    val selDay = if (parts.size == 3) parts[2] else Calendar.getInstance().get(Calendar.DAY_OF_MONTH)
+
+    var currentDisplayYear by remember { mutableIntStateOf(selYear) }
+    var currentDisplayMonth by remember { mutableIntStateOf(selMonth) }
+
+    val todayCal = remember { Calendar.getInstance() }
+    val todayYear = todayCal.get(Calendar.YEAR)
+    val todayMonth = todayCal.get(Calendar.MONTH)
+    val todayDay = todayCal.get(Calendar.DAY_OF_MONTH)
+
+    val currentLocale = Locale.getDefault()
+    val monthCal = remember(currentDisplayYear, currentDisplayMonth) {
+        Calendar.getInstance().apply {
+            set(Calendar.YEAR, currentDisplayYear)
+            set(Calendar.MONTH, currentDisplayMonth)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }
+    }
+
+    val monthFormatter = remember(currentLocale) {
+        SimpleDateFormat("MMMM yyyy", currentLocale)
+    }
+    val monthTitle = remember(monthCal, monthFormatter) {
+        val formatted = monthFormatter.format(monthCal.time)
+        formatted.replaceFirstChar { if (it.isLowerCase()) it.titlecase(currentLocale) else it.toString() }
+    }
+
+    // Total days in current month
+    val daysInMonth = monthCal.getActualMaximum(Calendar.DAY_OF_MONTH)
+    // First day of week offset (Monday = 0 ... Sunday = 6)
+    val firstDayOfWeek = monthCal.get(Calendar.DAY_OF_WEEK) // Sunday = 1, Monday = 2
+    val leadingEmptyDays = (firstDayOfWeek + 5) % 7
+
+    val weekdayShortNames = remember(currentLocale) {
+        val testCal = Calendar.getInstance()
+        val days = listOf(
+            Calendar.MONDAY,
+            Calendar.TUESDAY,
+            Calendar.WEDNESDAY,
+            Calendar.THURSDAY,
+            Calendar.FRIDAY,
+            Calendar.SATURDAY,
+            Calendar.SUNDAY
+        )
+        val sdf = SimpleDateFormat("EEE", currentLocale)
+        days.map { d ->
+            testCal.set(Calendar.DAY_OF_WEEK, d)
+            sdf.format(testCal.time).take(3).uppercase(currentLocale)
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismissRequest,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.92f)
+                .padding(vertical = 24.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = theme.surfaceColor,
+            border = BorderStroke(1.5.dp, theme.stitchingColor.copy(alpha = 0.6f)),
+            shadowElevation = 16.dp
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(20.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Header with Month Navigation
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    IconButton(
+                        onClick = {
+                            if (currentDisplayMonth == 0) {
+                                currentDisplayMonth = 11
+                                currentDisplayYear -= 1
+                            } else {
+                                currentDisplayMonth -= 1
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Mois précédent",
+                            tint = theme.primaryColor
+                        )
+                    }
+
+                    Text(
+                        text = monthTitle,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryColor
+                    )
+
+                    IconButton(
+                        onClick = {
+                            if (currentDisplayMonth == 11) {
+                                currentDisplayMonth = 0
+                                currentDisplayYear += 1
+                            } else {
+                                currentDisplayMonth += 1
+                            }
+                        }
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = "Mois suivant",
+                            tint = theme.primaryColor
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Weekday Header Row (7 Columns: LUN, MAR, MER...)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceAround
+                ) {
+                    weekdayShortNames.forEach { dayName ->
+                        Box(
+                            modifier = Modifier.size(38.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = dayName,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // 7-Column Days Grid
+                val totalCells = leadingEmptyDays + daysInMonth
+                val totalRows = (totalCells + 6) / 7
+
+                for (row in 0 until totalRows) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        for (col in 0..6) {
+                            val cellIndex = row * 7 + col
+                            val dayNumber = cellIndex - leadingEmptyDays + 1
+
+                            if (dayNumber in 1..daysInMonth) {
+                                val isSelected = currentDisplayYear == selYear &&
+                                        currentDisplayMonth == selMonth &&
+                                        dayNumber == selDay
+                                val isToday = currentDisplayYear == todayYear &&
+                                        currentDisplayMonth == todayMonth &&
+                                        dayNumber == todayDay
+
+                                val cellColor = when {
+                                    isSelected -> theme.primaryColor
+                                    else -> Color.Transparent
+                                }
+                                val textColor = when {
+                                    isSelected -> theme.onPrimaryColor
+                                    else -> theme.primaryColor
+                                }
+                                val borderStroke = when {
+                                    isSelected -> null
+                                    isToday -> BorderStroke(1.5.dp, theme.stitchingColor)
+                                    else -> null
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .size(38.dp)
+                                        .clip(CircleShape)
+                                        .background(cellColor)
+                                        .then(if (borderStroke != null) Modifier.border(borderStroke, CircleShape) else Modifier)
+                                        .clickable {
+                                            val ymd = String.format(
+                                                Locale.US,
+                                                "%04d-%02d-%02d",
+                                                currentDisplayYear,
+                                                currentDisplayMonth + 1,
+                                                dayNumber
+                                            )
+                                            onDateSelected(ymd)
+                                            onDismissRequest()
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "$dayNumber",
+                                        fontSize = 13.sp,
+                                        fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Medium,
+                                        color = textColor
+                                    )
+                                }
+                            } else {
+                                Box(modifier = Modifier.size(38.dp))
+                            }
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+
+                // Bottom Close button
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onDismissRequest) {
+                        Text(
+                            text = stringResource(R.string.close),
+                            fontWeight = FontWeight.Bold,
+                            color = theme.primaryColor
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun TransactionFormSheet(
     transaction: TransactionEntity?,
     accounts: List<AccountEntity>,
+    customCategories: List<Pair<String, String>> = emptyList(),
     baseCurrency: String,
+    initialTwtMode: Boolean = false,
     onDismiss: () -> Unit,
     onSave: (TransactionEntity) -> Unit,
+    onQuickCreateAccount: ((name: String, type: AccountType, balance: Double, currency: String, emoji: String, onCreated: (String) -> Unit) -> Unit)? = null,
     onScheduleRecurring: ((RecurringTransactionEntity) -> Unit)? = null
 ) {
     val theme = LocalArtisanTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val coroutineScope = rememberCoroutineScope()
+    val allCategories = remember(customCategories) { WalletCategories.combined(customCategories) }
 
-    var type by remember { mutableStateOf(transaction?.type ?: TransactionType.EXPENSE) }
+    val twtAccount = remember(accounts) { accounts.firstOrNull { TwtAccountHelper.isTwtAccount(it) } }
+    val defaultNonTwtCfa = remember(accounts) {
+        accounts.firstOrNull { !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it, "CFA") == "CFA" }
+            ?: accounts.firstOrNull()
+    }
+
+    var type by remember {
+        mutableStateOf(
+            transaction?.type ?: if (initialTwtMode) TransactionType.INCOME else TransactionType.EXPENSE
+        )
+    }
     var amountText by remember { mutableStateOf(transaction?.amount?.let { String.format(Locale.US, "%.2f", it) } ?: "") }
-    var payee by remember { mutableStateOf(transaction?.payee ?: "") }
-    var category by remember { mutableStateOf(transaction?.category ?: "Famille") }
+    var payee by remember { mutableStateOf(transaction?.payee ?: if (initialTwtMode) "TWT Bonus" else "") }
+    var category by remember {
+        mutableStateOf(
+            transaction?.category ?: if (initialTwtMode) "Bonus" else "Famille"
+        )
+    }
     var notes by remember { mutableStateOf(transaction?.notes ?: "") }
     var isRecurring by remember { mutableStateOf(false) }
     var recurrenceFrequency by remember { mutableStateOf(RecurrenceFrequency.MONTHLY) }
 
-    // Quick Currency Switcher State: CFA | USD (CFA default for Transfers, Tap Tap Send, MoneyGram)
-    var selectedCurrency by remember {
-        mutableStateOf(
-            if (transaction != null) {
-                val acc = accounts.firstOrNull { it.id == transaction.accountId }
-                acc?.currencyCode ?: "CFA"
-            } else "CFA"
+    val initialDateYmd = remember(transaction) {
+        val cal = Calendar.getInstance()
+        if (transaction != null) {
+            cal.timeInMillis = transaction.timestamp
+        }
+        String.format(
+            Locale.US,
+            "%04d-%02d-%02d",
+            cal.get(Calendar.YEAR),
+            cal.get(Calendar.MONTH) + 1,
+            cal.get(Calendar.DAY_OF_MONTH)
         )
     }
+    var selectedDateYmd by remember { mutableStateOf(initialDateYmd) }
+    var showCalendarModal by remember { mutableStateOf(false) }
 
     var accountId by remember {
         mutableStateOf(
-            transaction?.accountId ?: run {
-                // Prioritize account matching selectedCurrency (CFA by default)
-                val matchingAcc = accounts.firstOrNull { it.currencyCode.equals(selectedCurrency, ignoreCase = true) }
-                matchingAcc?.id ?: accounts.firstOrNull()?.id ?: ""
+            transaction?.accountId ?: if (initialTwtMode && twtAccount != null) {
+                twtAccount.id
+            } else {
+                defaultNonTwtCfa?.id ?: ""
             }
         )
     }
 
+    val selectedAccount = accounts.firstOrNull { it.id == accountId }
+    val isTwtSelected = TwtAccountHelper.isTwtAccount(selectedAccount)
+
+    var selectedCurrency by remember {
+        mutableStateOf(
+            when {
+                isTwtSelected || initialTwtMode -> "USD"
+                transaction != null -> Currencies.effectiveCurrencyCode(
+                    accounts.firstOrNull { it.id == transaction.accountId },
+                    "CFA"
+                )
+                else -> Currencies.effectiveCurrencyCode(defaultNonTwtCfa, "CFA")
+            }
+        )
+    }
+
+    // Keep TWT strictly locked to USD ($) whenever TWT account is selected
+    LaunchedEffect(accountId, accounts) {
+        val acc = accounts.firstOrNull { it.id == accountId }
+        if (TwtAccountHelper.isTwtAccount(acc)) {
+            selectedCurrency = "USD"
+            if (transaction == null && category == "Famille") {
+                category = "Bonus"
+            }
+        } else if (acc != null) {
+            selectedCurrency = Currencies.effectiveCurrencyCode(acc, "CFA")
+        }
+    }
+
     var errorMessage by remember { mutableStateOf<String?>(null) }
-    var categoryExpanded by remember { mutableStateOf(false) }
-    var accountExpanded by remember { mutableStateOf(false) }
+    var showCategoryPickerDialog by remember { mutableStateOf(false) }
+    var showAccountPickerDialog by remember { mutableStateOf(false) }
+    var showInlineAddAccountSheet by remember { mutableStateOf(false) }
+
+    val amountBringIntoView = remember { BringIntoViewRequester() }
+    val notesBringIntoView = remember { BringIntoViewRequester() }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = theme.surfaceColor
     ) {
+        val scrollState = rememberScrollState()
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .imePadding()
+                .verticalScroll(scrollState)
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 36.dp),
+                .padding(bottom = 128.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
             Text(
-                text = if (transaction == null) stringResource(R.string.add_transaction) else stringResource(R.string.edit_transaction),
+                text = if (transaction == null) {
+                    if (isTwtSelected) "Ajouter • ${TwtAccountHelper.currentTwtAccountName()} ($ USD)" else stringResource(R.string.add_transaction)
+                } else {
+                    stringResource(R.string.edit_transaction)
+                },
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = theme.primaryColor
@@ -1301,7 +1700,7 @@ fun TransactionFormSheet(
                 )
             }
 
-            // Amount Input with Quick Currency Switcher Pill (CFA | USD)
+            // Amount Input with Quick Currency Switcher Pill (Locked to $ when TWT is selected)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -1311,102 +1710,232 @@ fun TransactionFormSheet(
                     value = amountText,
                     onValueChange = { amountText = it; errorMessage = null },
                     label = { Text(stringResource(R.string.amount)) },
+                    prefix = if (selectedCurrency == "USD") {
+                        { Text("$ ", fontWeight = FontWeight.Bold, color = theme.primaryColor) }
+                    } else null,
+                    suffix = if (selectedCurrency == "CFA") {
+                        { Text(" CFA", fontWeight = FontWeight.Bold, color = theme.stitchingColor) }
+                    } else null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
                     singleLine = true,
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier
+                        .weight(1f)
+                        .bringIntoViewRequester(amountBringIntoView)
+                        .onFocusEvent { state ->
+                            if (state.isFocused) {
+                                coroutineScope.launch { amountBringIntoView.bringIntoView() }
+                            }
+                        }
+                        .testTag("tx_amount_input"),
                     shape = RoundedCornerShape(12.dp)
                 )
 
-                // Prominent Currency Toggle Pill (CFA | USD)
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = theme.backgroundColor,
                     border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f)),
                     modifier = Modifier.padding(top = 6.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selectedCurrency == "CFA") theme.primaryColor else Color.Transparent)
-                                .clickable {
-                                    selectedCurrency = "CFA"
-                                    val cfaAcc = accounts.firstOrNull { it.currencyCode.equals("CFA", ignoreCase = true) }
-                                    if (cfaAcc != null) accountId = cfaAcc.id
-                                }
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                    if (isTwtSelected) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = theme.primaryColor,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
-                                text = "CFA",
+                                text = "$ USD",
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 13.sp,
-                                color = if (selectedCurrency == "CFA") theme.onPrimaryColor else theme.primaryColor
+                                color = theme.primaryColor
                             )
                         }
-
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(if (selectedCurrency == "USD") theme.primaryColor else Color.Transparent)
-                                .clickable {
-                                    selectedCurrency = "USD"
-                                    val usdAcc = accounts.firstOrNull { it.currencyCode.equals("USD", ignoreCase = true) }
-                                    if (usdAcc != null) accountId = usdAcc.id
-                                }
-                                .padding(horizontal = 10.dp, vertical = 8.dp)
+                    } else {
+                        Row(
+                            modifier = Modifier.padding(4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = "USD",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
-                                color = if (selectedCurrency == "USD") theme.onPrimaryColor else theme.primaryColor
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selectedCurrency == "CFA") theme.primaryColor else Color.Transparent)
+                                    .clickable {
+                                        selectedCurrency = "CFA"
+                                        val cfaAcc = accounts.firstOrNull {
+                                            !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it, "CFA") == "CFA"
+                                        }
+                                        if (cfaAcc != null) accountId = cfaAcc.id
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = "CFA",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (selectedCurrency == "CFA") theme.onPrimaryColor else theme.primaryColor
+                                )
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (selectedCurrency == "USD") theme.primaryColor else Color.Transparent)
+                                    .clickable {
+                                        selectedCurrency = "USD"
+                                        val usdAcc = accounts.firstOrNull { Currencies.effectiveCurrencyCode(it, "CFA") == "USD" }
+                                        if (usdAcc != null) accountId = usdAcc.id
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp)
+                            ) {
+                                Text(
+                                    text = "$ USD",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = if (selectedCurrency == "USD") theme.onPrimaryColor else theme.primaryColor
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            // Frequent Contacts Quick-Chip Bar (Prioritized for Transfer, MoneyGram, Tap Tap Send, Family)
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "Bénéficiaires Fréquents (Famille • CFA)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = theme.primaryColor,
-                    fontWeight = FontWeight.SemiBold
-                )
-                LazyRow(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = PaddingValues(vertical = 4.dp)
+            // Date Field & Quick-Select Pills ('Today' / 'Aujourd'hui' and 'Yesterday' / 'Hier')
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Surface(
+                    onClick = { showCalendarModal = true },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(12.dp),
+                    color = theme.backgroundColor,
+                    border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
                 ) {
-                    items(PresetFamilyContacts.NAMES) { contactName ->
-                        val isSelected = payee.equals(contactName, ignoreCase = true)
-                        SuggestionChip(
-                            onClick = {
-                                payee = contactName
-                                category = "Famille"
-                                selectedCurrency = "CFA"
-                                val cfaAcc = accounts.firstOrNull { it.currencyCode.equals("CFA", ignoreCase = true) }
-                                if (cfaAcc != null) accountId = cfaAcc.id
-                            },
-                            label = {
-                                Text(
-                                    contactName,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    fontSize = 12.sp
-                                )
-                            },
-                            colors = SuggestionChipDefaults.suggestionChipColors(
-                                containerColor = if (isSelected) theme.primaryColor else theme.backgroundColor,
-                                labelColor = if (isSelected) theme.onPrimaryColor else theme.primaryColor
-                            ),
-                            border = SuggestionChipDefaults.suggestionChipBorder(
-                                enabled = true,
-                                borderColor = if (isSelected) theme.primaryColor else theme.stitchingColor.copy(alpha = 0.4f)
-                            )
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.CalendarMonth,
+                            contentDescription = stringResource(R.string.date),
+                            tint = theme.primaryColor,
+                            modifier = Modifier.size(20.dp)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = stringResource(R.string.date),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray,
+                                fontSize = 10.sp
+                            )
+                            Text(
+                                text = selectedDateYmd,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = theme.primaryColor
+                            )
+                        }
+                    }
+                }
+
+                Surface(
+                    onClick = {
+                        val cal = Calendar.getInstance()
+                        selectedDateYmd = String.format(
+                            Locale.US,
+                            "%04d-%02d-%02d",
+                            cal.get(Calendar.YEAR),
+                            cal.get(Calendar.MONTH) + 1,
+                            cal.get(Calendar.DAY_OF_MONTH)
+                        )
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = theme.backgroundColor,
+                    border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = stringResource(R.string.today),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = theme.primaryColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp)
+                    )
+                }
+
+                Surface(
+                    onClick = {
+                        val cal = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+                        selectedDateYmd = String.format(
+                            Locale.US,
+                            "%04d-%02d-%02d",
+                            cal.get(Calendar.YEAR),
+                            cal.get(Calendar.MONTH) + 1,
+                            cal.get(Calendar.DAY_OF_MONTH)
+                        )
+                    },
+                    shape = RoundedCornerShape(10.dp),
+                    color = theme.backgroundColor,
+                    border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.4f))
+                ) {
+                    Text(
+                        text = stringResource(R.string.yesterday),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = theme.primaryColor,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 12.dp)
+                    )
+                }
+            }
+
+            // Frequent Contacts Quick-Chip Bar (21 Family Members • Auto-selects Famille & CFA)
+            if (!isTwtSelected) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        text = "Bénéficiaires Fréquents (Famille • CFA)",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = theme.primaryColor,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        contentPadding = PaddingValues(vertical = 4.dp)
+                    ) {
+                        items(PresetFamilyContacts.NAMES) { contactName ->
+                            val isSelected = payee.equals(contactName, ignoreCase = true)
+                            SuggestionChip(
+                                onClick = {
+                                    payee = contactName
+                                    category = "Famille"
+                                    selectedCurrency = "CFA"
+                                    val cfaAcc = accounts.firstOrNull {
+                                        !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it, "CFA") == "CFA"
+                                    }
+                                    if (cfaAcc != null) accountId = cfaAcc.id
+                                },
+                                label = {
+                                    Text(
+                                        contactName,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                        fontSize = 12.sp
+                                    )
+                                },
+                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                    containerColor = if (isSelected) theme.primaryColor else theme.backgroundColor,
+                                    labelColor = if (isSelected) theme.onPrimaryColor else theme.primaryColor
+                                ),
+                                border = SuggestionChipDefaults.suggestionChipBorder(
+                                    enabled = true,
+                                    borderColor = if (isSelected) theme.primaryColor else theme.stitchingColor.copy(alpha = 0.4f)
+                                )
+                            )
+                        }
                     }
                 }
             }
@@ -1417,95 +1946,102 @@ fun TransactionFormSheet(
                 onValueChange = { payee = it; errorMessage = null },
                 label = { Text(stringResource(R.string.payee_merchant)) },
                 singleLine = true,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier.fillMaxWidth().testTag("tx_payee_input"),
                 shape = RoundedCornerShape(12.dp)
             )
 
-            // Category Picker (Resolved touch click intercept bug)
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = "${WalletCategories.getIcon(category)} $category",
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text(stringResource(R.string.category)) },
-                    trailingIcon = {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                // Invisible click interceptor across entire Box surface
-                Box(
+            // Category Modal Picker (reliable mobile click target inside scrollable ModalBottomSheet)
+            Surface(
+                onClick = { showCategoryPickerDialog = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("category_selector_button"),
+                shape = RoundedCornerShape(12.dp),
+                color = theme.backgroundColor,
+                border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+            ) {
+                Row(
                     modifier = Modifier
-                        .matchParentSize()
-                        .clickable { categoryExpanded = true }
-                )
-                DropdownMenu(
-                    expanded = categoryExpanded,
-                    onDismissRequest = { categoryExpanded = false }
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    WalletCategories.ALL.forEach { (catName, icon) ->
-                        DropdownMenuItem(
-                            text = { Text("$icon $catName") },
-                            onClick = {
-                                category = catName
-                                if (catName in listOf("Transfert", "MoneyGram", "Tap Tap Send", "Famille")) {
-                                    selectedCurrency = "CFA"
-                                    val cfaAcc = accounts.firstOrNull { it.currencyCode.equals("CFA", ignoreCase = true) }
-                                    if (cfaAcc != null) accountId = cfaAcc.id
-                                }
-                                categoryExpanded = false
-                            }
+                    Column {
+                        Text(
+                            text = stringResource(R.string.category),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "${WalletCategories.getIcon(category, customCategories)} $category",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = theme.primaryColor
                         )
                     }
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
                 }
             }
 
-            // Account Picker (Resolved touch click intercept bug for Expenses and Income)
-            val selectedAccount = accounts.firstOrNull { it.id == accountId }
-            Box(modifier = Modifier.fillMaxWidth()) {
-                OutlinedTextField(
-                    value = selectedAccount?.let { "${it.emojiAvatar} ${it.name} (${it.currencyCode})" } ?: stringResource(R.string.select_account),
-                    onValueChange = {},
-                    readOnly = true,
-                    label = { Text(stringResource(R.string.select_account)) },
-                    trailingIcon = {
-                        Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
-                    },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp)
-                )
-                // Invisible click interceptor across entire Box surface
-                Box(
+            // Account Modal Picker + Inline "+ Ajouter un compte" (Fixes dropdown failure on mobile!)
+            Surface(
+                onClick = { showAccountPickerDialog = true },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("account_selector_button"),
+                shape = RoundedCornerShape(12.dp),
+                color = theme.backgroundColor,
+                border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+            ) {
+                Row(
                     modifier = Modifier
-                        .matchParentSize()
-                        .clickable { accountExpanded = true }
-                )
-                DropdownMenu(
-                    expanded = accountExpanded,
-                    onDismissRequest = { accountExpanded = false }
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    accounts.forEach { acc ->
-                        DropdownMenuItem(
-                            text = { Text("${acc.emojiAvatar} ${acc.name} (${Currencies.format(acc.balance, acc.currencyCode)})") },
-                            onClick = {
-                                accountId = acc.id
-                                selectedCurrency = acc.currencyCode
-                                accountExpanded = false
-                            }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = stringResource(R.string.select_account),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.Gray,
+                            fontSize = 11.sp
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = selectedAccount?.let {
+                                val displayName = if (TwtAccountHelper.isTwtAccount(it)) TwtAccountHelper.currentTwtAccountName() else it.name
+                                val curLabel = Currencies.effectiveCurrencyCode(it, "CFA")
+                                "${it.emojiAvatar} $displayName ($curLabel)"
+                            } ?: stringResource(R.string.select_account),
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                            color = theme.primaryColor
                         )
                     }
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null, tint = theme.primaryColor)
                 }
             }
 
-            // Notes / Memo
+            // Notes / Memo (auto-scrolls above keyboard when focused)
             OutlinedTextField(
                 value = notes,
                 onValueChange = { notes = it },
                 label = { Text(stringResource(R.string.notes_memo)) },
                 singleLine = false,
                 maxLines = 2,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .bringIntoViewRequester(notesBringIntoView)
+                    .onFocusEvent { state ->
+                        if (state.isFocused) {
+                            coroutineScope.launch { notesBringIntoView.bringIntoView() }
+                        }
+                    }
+                    .testTag("tx_notes_input"),
                 shape = RoundedCornerShape(12.dp)
             )
 
@@ -1613,6 +2149,19 @@ fun TransactionFormSheet(
                         } else if (accountId.isBlank()) {
                             errorMessage = "Veuillez sélectionner un compte."
                         } else {
+                            val dateParts = selectedDateYmd.split("-").mapNotNull { it.toIntOrNull() }
+                            val txCal = Calendar.getInstance()
+                            if (dateParts.size == 3) {
+                                txCal.set(Calendar.YEAR, dateParts[0])
+                                txCal.set(Calendar.MONTH, dateParts[1] - 1)
+                                txCal.set(Calendar.DAY_OF_MONTH, dateParts[2])
+                                txCal.set(Calendar.HOUR_OF_DAY, 12)
+                                txCal.set(Calendar.MINUTE, 0)
+                                txCal.set(Calendar.SECOND, 0)
+                                txCal.set(Calendar.MILLISECOND, 0)
+                            }
+                            val finalTimestamp = txCal.timeInMillis
+
                             val entity = transaction?.copy(
                                 accountId = accountId,
                                 type = type,
@@ -1620,6 +2169,7 @@ fun TransactionFormSheet(
                                 payee = payee.trim(),
                                 category = category,
                                 notes = notes.trim(),
+                                timestamp = finalTimestamp,
                                 updatedAt = System.currentTimeMillis()
                             ) ?: TransactionEntity(
                                 accountId = accountId,
@@ -1628,7 +2178,8 @@ fun TransactionFormSheet(
                                 payee = payee.trim(),
                                 category = category,
                                 notes = notes.trim(),
-                                timestamp = System.currentTimeMillis()
+                                timestamp = finalTimestamp,
+                                updatedAt = System.currentTimeMillis()
                             )
                             onSave(entity)
 
@@ -1659,7 +2210,193 @@ fun TransactionFormSheet(
             }
         }
     }
+
+    if (showCalendarModal) {
+        CalendarPickerModal(
+            selectedDateYmd = selectedDateYmd,
+            onDateSelected = { newDate ->
+                selectedDateYmd = newDate
+            },
+            onDismissRequest = { showCalendarModal = false }
+        )
+    }
+
+    if (showCategoryPickerDialog) {
+        Dialog(onDismissRequest = { showCategoryPickerDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = theme.surfaceColor,
+                border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+                    Text(
+                        text = stringResource(R.string.category),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryColor
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    LazyColumn(modifier = Modifier.fillMaxWidth().height(340.dp)) {
+                        items(allCategories) { (catName, icon) ->
+                            val isSel = category.equals(catName, ignoreCase = true)
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) theme.primaryContainer else Color.Transparent)
+                                    .clickable {
+                                        category = catName
+                                        if (catName in PresetFamilyContacts.REMITTANCE_FAMILY_CATEGORIES && !isTwtSelected) {
+                                            selectedCurrency = "CFA"
+                                            val cfaAcc = accounts.firstOrNull {
+                                                !TwtAccountHelper.isTwtAccount(it) && Currencies.effectiveCurrencyCode(it, "CFA") == "CFA"
+                                            }
+                                            if (cfaAcc != null) accountId = cfaAcc.id
+                                        }
+                                        showCategoryPickerDialog = false
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(icon, fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Text(
+                                    catName,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Medium,
+                                    color = theme.primaryColor,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (isSel) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = theme.primaryColor, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showCategoryPickerDialog = false }) {
+                            Text(stringResource(R.string.close))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showAccountPickerDialog) {
+        Dialog(onDismissRequest = { showAccountPickerDialog = false }) {
+            Surface(
+                shape = RoundedCornerShape(22.dp),
+                color = theme.surfaceColor,
+                border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.fillMaxWidth().padding(18.dp)) {
+                    Text(
+                        text = stringResource(R.string.select_account),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = theme.primaryColor
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    if (onQuickCreateAccount != null) {
+                        Button(
+                            onClick = {
+                                showAccountPickerDialog = false
+                                showInlineAddAccountSheet = true
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(44.dp)
+                                .testTag("btn_inline_add_account"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = theme.primaryColor,
+                                contentColor = theme.onPrimaryColor
+                            )
+                        ) {
+                            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(stringResource(R.string.add_account), fontWeight = FontWeight.Bold)
+                        }
+                        Spacer(modifier = Modifier.height(10.dp))
+                        HorizontalDivider(color = theme.cardBorderColor.copy(alpha = 0.4f))
+                        Spacer(modifier = Modifier.height(6.dp))
+                    }
+
+                    LazyColumn(modifier = Modifier.fillMaxWidth().height(280.dp)) {
+                        items(accounts, key = { it.id }) { acc ->
+                            val isSel = acc.id == accountId
+                            val displayName = if (TwtAccountHelper.isTwtAccount(acc)) TwtAccountHelper.currentTwtAccountName() else acc.name
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSel) theme.primaryContainer else Color.Transparent)
+                                    .clickable {
+                                        accountId = acc.id
+                                        if (TwtAccountHelper.isTwtAccount(acc)) {
+                                            selectedCurrency = "USD"
+                                            if (transaction == null) category = "Bonus"
+                                        } else {
+                                            selectedCurrency = Currencies.effectiveCurrencyCode(acc, "CFA")
+                                        }
+                                        showAccountPickerDialog = false
+                                    }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(acc.emojiAvatar, fontSize = 18.sp)
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = displayName,
+                                        fontWeight = if (isSel) FontWeight.Bold else FontWeight.SemiBold,
+                                        color = theme.primaryColor
+                                    )
+                                    Text(
+                                        text = Currencies.formatForAccount(acc.balance, acc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = theme.secondaryTextColor
+                                    )
+                                }
+                                if (isSel) {
+                                    Icon(Icons.Default.Check, contentDescription = null, tint = theme.primaryColor, modifier = Modifier.size(18.dp))
+                                }
+                            }
+                        }
+                    }
+
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { showAccountPickerDialog = false }) {
+                            Text(stringResource(R.string.close))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (showInlineAddAccountSheet && onQuickCreateAccount != null) {
+        AccountEditSheet(
+            account = null,
+            baseCurrency = "CFA",
+            onDismiss = { showInlineAddAccountSheet = false },
+            onSave = { newName, newType, newBalance, newCur, newEmoji ->
+                onQuickCreateAccount(newName, newType, newBalance, newCur, newEmoji) { createdId ->
+                    accountId = createdId
+                    if (TwtAccountHelper.isTwtAccountName(newName)) {
+                        selectedCurrency = "USD"
+                        if (transaction == null) category = "Bonus"
+                    } else {
+                        selectedCurrency = newCur
+                    }
+                }
+                showInlineAddAccountSheet = false
+            }
+        )
+    }
 }
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -1669,6 +2406,7 @@ fun FilterBottomSheet(
     minAmount: Double?,
     maxAmount: Double?,
     accounts: List<AccountEntity>,
+    customCategories: List<Pair<String, String>> = emptyList(),
     onApply: (category: String?, account: String?, min: Double?, max: Double?) -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -1728,7 +2466,7 @@ fun FilterBottomSheet(
                             categoryDropdown = false
                         }
                     )
-                    WalletCategories.ALL.forEach { (catName, icon) ->
+                    WalletCategories.combined(customCategories).forEach { (catName, icon) ->
                         DropdownMenuItem(
                             text = { Text("$icon $catName") },
                             onClick = {

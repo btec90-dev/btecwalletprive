@@ -1,7 +1,10 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.material3.Surface
+
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,11 +15,14 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -44,9 +50,6 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -67,6 +70,7 @@ import com.example.R
 import com.example.data.model.AccountEntity
 import com.example.data.model.AccountType
 import com.example.data.model.Currencies
+import com.example.data.model.TwtAccountHelper
 import com.example.ui.components.AccountAvatarPickerDialog
 import com.example.ui.components.ArtisanCard
 import com.example.ui.theme.LocalArtisanTheme
@@ -79,6 +83,7 @@ fun AccountsScreen(
     totalIncome: Double,
     totalExpense: Double,
     baseCurrency: String,
+    twtUsdBalance: Double? = null,
     onAddAccount: (name: String, type: AccountType, balance: Double, currency: String, emoji: String) -> Unit,
     onUpdateAccount: (AccountEntity) -> Unit,
     onDeleteAccount: (String) -> Unit
@@ -139,6 +144,24 @@ fun AccountsScreen(
                             fontWeight = FontWeight.Bold,
                             color = theme.onPrimaryColor
                         )
+
+                        if (twtUsdBalance != null) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = theme.metallicAccent.copy(alpha = 0.22f),
+                                border = BorderStroke(1.dp, theme.metallicAccent.copy(alpha = 0.65f)),
+                                modifier = Modifier.testTag("twt_usd_hero_badge")
+                            ) {
+                                Text(
+                                    text = "🪙 ${TwtAccountHelper.currentTwtAccountName()} : ${Currencies.format(twtUsdBalance, "USD")}",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = theme.onPrimaryColor,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                                )
+                            }
+                        }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
@@ -235,15 +258,15 @@ fun AccountsScreen(
                         Text(
                             text = stringResource(R.string.account_order_info),
                             style = MaterialTheme.typography.labelSmall,
-                            color = Color.Gray
+                            color = theme.secondaryTextColor
                         )
                     }
                 }
             }
 
-            // Accounts List sorted with Cash first, Card, Savings, Custom (Slide to delete enabled)
+            // Accounts List sorted with Cash first, Card, Savings, Custom
             items(accounts, key = { it.id }) { account ->
-                SwipeToDeleteAccount(
+                AccountItemCard(
                     account = account,
                     onEdit = { accountToEdit = account },
                     onDelete = { accountToDelete = account }
@@ -309,65 +332,6 @@ fun AccountsScreen(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SwipeToDeleteAccount(
-    account: AccountEntity,
-    onEdit: () -> Unit,
-    onDelete: () -> Unit
-) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { dismissValue ->
-            if (dismissValue == SwipeToDismissBoxValue.EndToStart || dismissValue == SwipeToDismissBoxValue.StartToEnd) {
-                onDelete()
-                true
-            } else {
-                false
-            }
-        }
-    )
-
-    SwipeToDismissBox(
-        state = dismissState,
-        backgroundContent = {
-            val direction = dismissState.dismissDirection
-            val alignment = when (direction) {
-                SwipeToDismissBoxValue.StartToEnd -> Alignment.CenterStart
-                else -> Alignment.CenterEnd
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFFD32F2F), RoundedCornerShape(18.dp))
-                    .padding(horizontal = 24.dp),
-                contentAlignment = alignment
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Delete,
-                        contentDescription = "Delete",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Delete",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                }
-            }
-        }
-    ) {
-        AccountItemCard(
-            account = account,
-            onEdit = onEdit,
-            onDelete = onDelete
-        )
-    }
-}
-
 @Composable
 fun AccountItemCard(
     account: AccountEntity,
@@ -403,10 +367,13 @@ fun AccountItemCard(
 
             Spacer(modifier = Modifier.width(14.dp))
 
+            val isTwt = TwtAccountHelper.isTwtAccount(account)
+            val displayName = if (isTwt) TwtAccountHelper.currentTwtAccountName() else account.name
+
             // Details
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = account.name,
+                    text = displayName,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = theme.primaryColor
@@ -432,13 +399,29 @@ fun AccountItemCard(
                             fontWeight = FontWeight.Medium
                         )
                     }
+                    if (isTwt) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Surface(
+                            shape = RoundedCornerShape(4.dp),
+                            color = theme.metallicAccent.copy(alpha = 0.2f)
+                        ) {
+                            Text(
+                                text = "USD ($)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = theme.primaryColor,
+                                modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                            )
+                        }
+                    }
                 }
             }
 
             // Balance
             Column(horizontalAlignment = Alignment.End) {
                 Text(
-                    text = Currencies.format(account.balance, account.currencyCode),
+                    text = Currencies.formatForAccount(account.balance, account, "CFA"),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = theme.primaryColor
@@ -484,13 +467,20 @@ fun AccountEditSheet(
 ) {
     val theme = LocalArtisanTheme.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
 
     var name by remember { mutableStateOf(account?.name ?: "") }
     var type by remember { mutableStateOf(account?.type ?: AccountType.CASH) }
     var balanceText by remember { mutableStateOf(account?.balance?.toString() ?: "0.00") }
-    var currency by remember { mutableStateOf(account?.currencyCode ?: baseCurrency) }
+    var currency by remember {
+        mutableStateOf(
+            if (TwtAccountHelper.isTwtAccount(account)) "USD"
+            else Currencies.effectiveCurrencyCode(account, baseCurrency)
+        )
+    }
     var emojiAvatar by remember { mutableStateOf(account?.emojiAvatar ?: "💵") }
     var showEmojiDialog by remember { mutableStateOf(false) }
+    val isTwtLocked = TwtAccountHelper.isTwtAccountName(name)
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -500,8 +490,10 @@ fun AccountEditSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .imePadding()
                 .padding(horizontal = 24.dp)
-                .padding(bottom = 36.dp),
+                .padding(bottom = 128.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text(
@@ -533,22 +525,137 @@ fun AccountEditSheet(
                         fontWeight = FontWeight.SemiBold
                     )
                     Text(
-                        text = "Tap icon to change emoji",
+                        text = "Appuyez pour changer l'icône",
                         style = MaterialTheme.typography.labelSmall,
-                        color = Color.Gray
+                        color = theme.secondaryTextColor
                     )
+                }
+            }
+
+            // Quick Account Presets (Tap Tap Send, MoneyGram, Transfer)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = "Modèles Rapides (Comptes & Transferts CFA)",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = theme.primaryColor,
+                    fontWeight = FontWeight.SemiBold
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val presets = listOf(
+                        Triple("Tap Tap Send", "📲", AccountType.CUSTOM),
+                        Triple("MoneyGram", "💸", AccountType.CUSTOM),
+                        Triple("Transfert", "🔄", AccountType.CUSTOM)
+                    )
+                    for ((presetName, presetEmoji, presetType) in presets) {
+                        Surface(
+                            onClick = {
+                                name = presetName
+                                emojiAvatar = presetEmoji
+                                type = presetType
+                                currency = "CFA"
+                            },
+                            shape = RoundedCornerShape(8.dp),
+                            color = theme.backgroundColor,
+                            border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.4f)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text(
+                                text = "$presetEmoji $presetName",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = theme.primaryColor,
+                                modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
+                                textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                            )
+                        }
+                    }
                 }
             }
 
             // Name
             OutlinedTextField(
                 value = name,
-                onValueChange = { name = it },
+                onValueChange = { newName ->
+                    name = newName
+                    if (TwtAccountHelper.isTwtAccountName(newName)) {
+                        currency = "USD"
+                    }
+                },
                 label = { Text(stringResource(R.string.account_name)) },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(12.dp)
             )
+
+            // Currency Selector Toggle (CFA | USD — strictly locked to $ USD for TWT accounts)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "Devise du Compte",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = theme.primaryColor
+                )
+                if (isTwtLocked) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.metallicAccent.copy(alpha = 0.22f),
+                        border = BorderStroke(1.dp, theme.metallicAccent)
+                    ) {
+                        Text(
+                            text = "🔒 USD ($)",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = theme.primaryColor,
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp)
+                        )
+                    }
+                } else {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = theme.backgroundColor,
+                        border = BorderStroke(1.dp, theme.stitchingColor.copy(alpha = 0.5f))
+                    ) {
+                        Row(modifier = Modifier.padding(3.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(if (currency == "CFA") theme.primaryColor else Color.Transparent)
+                                    .clickable { currency = "CFA" }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "CFA",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (currency == "CFA") theme.onPrimaryColor else theme.primaryColor
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(7.dp))
+                                    .background(if (currency == "USD") theme.primaryColor else Color.Transparent)
+                                    .clickable { currency = "USD" }
+                                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Text(
+                                    text = "$ USD",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = if (currency == "USD") theme.onPrimaryColor else theme.primaryColor
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
 
             // Account Type Selector
             Column {

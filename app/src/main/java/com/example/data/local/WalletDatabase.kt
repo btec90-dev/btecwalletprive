@@ -8,8 +8,9 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.data.model.AccountEntity
 import com.example.data.model.AccountType
 import com.example.data.model.ContactEntity
+import com.example.data.model.RecurringTransactionEntity
 import com.example.data.model.TransactionEntity
-import com.example.data.model.TransactionType
+import com.example.data.model.TwtAccountHelper
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -20,9 +21,9 @@ import java.util.UUID
         AccountEntity::class,
         TransactionEntity::class,
         ContactEntity::class,
-        com.example.data.model.RecurringTransactionEntity::class
+        RecurringTransactionEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class WalletDatabase : RoomDatabase() {
@@ -43,7 +44,6 @@ abstract class WalletDatabase : RoomDatabase() {
                     .addCallback(object : Callback() {
                         override fun onCreate(db: SupportSQLiteDatabase) {
                             super.onCreate(db)
-                            // Populate default starter data
                             CoroutineScope(Dispatchers.IO).launch {
                                 INSTANCE?.let { database ->
                                     populateInitialData(database.walletDao())
@@ -59,116 +59,72 @@ abstract class WalletDatabase : RoomDatabase() {
 
         suspend fun populateInitialData(dao: WalletDao) {
             val now = System.currentTimeMillis()
-            val cashAccId = UUID.randomUUID().toString()
-            val cardAccId = UUID.randomUUID().toString()
-            val savingsAccId = UUID.randomUUID().toString()
-            val twtAccId = UUID.randomUUID().toString()
 
-            val cashAccount = AccountEntity(
-                id = cashAccId,
-                name = "Physical Cash Wallet",
-                type = AccountType.CASH,
-                balance = 480.00,
-                currencyCode = "USD",
-                emojiAvatar = "💵",
-                sortOrder = 0,
-                updatedAt = now
+            val defaultAccounts = listOf(
+                AccountEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = "Espèces (CFA)",
+                    type = AccountType.CASH,
+                    balance = 0.0,
+                    currencyCode = "CFA",
+                    emojiAvatar = "💵",
+                    sortOrder = 0,
+                    updatedAt = now
+                ),
+                AccountEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = "Tap Tap Send",
+                    type = AccountType.CUSTOM,
+                    balance = 0.0,
+                    currencyCode = "CFA",
+                    emojiAvatar = "📲",
+                    sortOrder = 1,
+                    updatedAt = now
+                ),
+                AccountEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = "MoneyGram",
+                    type = AccountType.CUSTOM,
+                    balance = 0.0,
+                    currencyCode = "CFA",
+                    emojiAvatar = "💸",
+                    sortOrder = 2,
+                    updatedAt = now
+                ),
+                AccountEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = "Transfert / Virement",
+                    type = AccountType.CUSTOM,
+                    balance = 0.0,
+                    currencyCode = "CFA",
+                    emojiAvatar = "🔄",
+                    sortOrder = 3,
+                    updatedAt = now
+                ),
+                AccountEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = "Carte Bancaire",
+                    type = AccountType.CARD,
+                    balance = 0.0,
+                    currencyCode = "CFA",
+                    emojiAvatar = "💳",
+                    sortOrder = 4,
+                    updatedAt = now
+                ),
+                AccountEntity(
+                    id = UUID.randomUUID().toString(),
+                    name = TwtAccountHelper.currentTwtAccountName(),
+                    type = AccountType.SAVINGS,
+                    balance = 0.0,
+                    currencyCode = "USD",
+                    emojiAvatar = "🪙",
+                    sortOrder = 5,
+                    updatedAt = now
+                )
             )
 
-            val cardAccount = AccountEntity(
-                id = cardAccId,
-                name = "Artisan Black Card",
-                type = AccountType.CARD,
-                balance = 3250.75,
-                currencyCode = "USD",
-                emojiAvatar = "💳",
-                sortOrder = 1,
-                updatedAt = now
-            )
-
-            val savingsAccount = AccountEntity(
-                id = savingsAccId,
-                name = "Vault Reserve",
-                type = AccountType.SAVINGS,
-                balance = 14500.00,
-                currencyCode = "USD",
-                emojiAvatar = "🏦",
-                sortOrder = 2,
-                updatedAt = now
-            )
-
-            val twtAccount = AccountEntity(
-                id = twtAccId,
-                name = "TWT Bonuses Account",
-                type = AccountType.SAVINGS,
-                balance = 2450.00,
-                currencyCode = "CFA",
-                emojiAvatar = "🪙",
-                sortOrder = 3,
-                updatedAt = now
-            )
-
-            dao.insertAccount(cashAccount)
-            dao.insertAccount(cardAccount)
-            dao.insertAccount(savingsAccount)
-            dao.insertAccount(twtAccount)
-
-            // Initial contacts
-            dao.insertContact(ContactEntity(name = "Amadou Diallo", channel = "MoneyGram", details = "Bamako, Mali"))
-            dao.insertContact(ContactEntity(name = "Koffi Kouassi", channel = "Tap Tap Send", details = "Abidjan, Côte d'Ivoire"))
-
-            // Initial Recurring Transactions (Monthly Rent, Salary, TWT Staking Bonus)
-            val rentRec = com.example.data.model.RecurringTransactionEntity(
-                id = UUID.randomUUID().toString(),
-                accountId = cardAccId,
-                type = TransactionType.EXPENSE,
-                amount = 1200.00,
-                payee = "Immobilière Bamako (Loyer)",
-                category = "Housing & Rent",
-                frequency = com.example.data.model.RecurrenceFrequency.MONTHLY,
-                startDate = now - (86400000L * 30),
-                lastExecutedDate = now - (86400000L * 30),
-                nextDueDate = now + (86400000L * 5), // due in 5 days
-                isActive = true,
-                notes = "Loyer mensuel appartement",
-                updatedAt = now
-            )
-
-            val salaryRec = com.example.data.model.RecurringTransactionEntity(
-                id = UUID.randomUUID().toString(),
-                accountId = cardAccId,
-                type = TransactionType.INCOME,
-                amount = 3500.00,
-                payee = "Entreprise Balatec Tech",
-                category = "Salary & Wages",
-                frequency = com.example.data.model.RecurrenceFrequency.MONTHLY,
-                startDate = now - (86400000L * 30),
-                lastExecutedDate = now - (86400000L * 30),
-                nextDueDate = now + (86400000L * 15), // due in 15 days
-                isActive = true,
-                notes = "Salaire mensuel fixe",
-                updatedAt = now
-            )
-
-            val twtBonusRec = com.example.data.model.RecurringTransactionEntity(
-                id = UUID.randomUUID().toString(),
-                accountId = twtAccId,
-                type = TransactionType.INCOME,
-                amount = 500.00,
-                payee = "TWT Staking Rewards",
-                category = "Bonuses (TWT)",
-                frequency = com.example.data.model.RecurrenceFrequency.MONTHLY,
-                startDate = now - (86400000L * 30),
-                lastExecutedDate = now - (86400000L * 30),
-                nextDueDate = now + (86400000L * 2), // due in 2 days
-                isActive = true,
-                notes = "Bonus mensuel TWT",
-                updatedAt = now
-            )
-
-            dao.insertRecurringTransaction(rentRec)
-            dao.insertRecurringTransaction(salaryRec)
-            dao.insertRecurringTransaction(twtBonusRec)
+            defaultAccounts.forEach { dao.insertAccount(it) }
+            // Zero pre-loaded transactions on initial install
         }
     }
 }

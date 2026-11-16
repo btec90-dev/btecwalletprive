@@ -1,7 +1,13 @@
 package com.example
 
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.res.AssetManager
 import android.content.res.Configuration
+import android.content.res.Resources
 import android.os.Bundle
+import androidx.activity.compose.LocalActivityResultRegistryOwner
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
@@ -10,11 +16,15 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,31 +50,33 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.data.sync.SyncStatus
 import com.example.security.BiometricHelper
+import com.example.ui.components.artisanNavigationBarLeather
 import com.example.ui.screens.AccountsScreen
-import com.example.ui.screens.AnalyticsScreen
 import com.example.ui.screens.AuthGateBottomSheet
 import com.example.ui.screens.CategoriesScreen
 import com.example.ui.screens.ExportImportDialog
@@ -74,6 +86,9 @@ import com.example.ui.screens.SettingsScreen
 import com.example.ui.theme.BalatecWalletTheme
 import com.example.ui.theme.LocalArtisanTheme
 import com.example.ui.viewmodel.WalletViewModel
+import kotlinx.coroutines.delay
+import java.text.SimpleDateFormat
+import java.util.Date
 import java.util.Locale
 
 class MainActivity : FragmentActivity() {
@@ -111,46 +126,98 @@ class MainActivity : FragmentActivity() {
             val currentThemeConfig by viewModel.currentTheme.collectAsState()
             val currentLanguage by viewModel.currentLanguage.collectAsState()
             val isLocked by viewModel.isLocked.collectAsState()
+            var showSplash by remember { mutableStateOf(true) }
 
-            // Dynamic locale support for English and French (default French)
+            LaunchedEffect(Unit) {
+                delay(650L)
+                showSplash = false
+            }
+
+            // Dynamic locale support for English and French (default French) while preserving Activity owners
             val locale = if (currentLanguage.startsWith("en", ignoreCase = true)) Locale.ENGLISH else Locale.FRENCH
-            val baseContext = LocalContext.current
-            val localizedContext = remember(baseContext, locale) {
+            val activityContext = this@MainActivity
+            val localizedContext = remember(activityContext, locale) {
                 Locale.setDefault(locale)
-                val configuration = android.content.res.Configuration(baseContext.resources.configuration).apply {
+                val configuration = Configuration(activityContext.resources.configuration).apply {
                     setLocale(locale)
                     setLayoutDirection(locale)
                 }
-                baseContext.createConfigurationContext(configuration)
+                val configContext = activityContext.createConfigurationContext(configuration)
+                object : ContextWrapper(activityContext) {
+                    override fun getResources(): Resources = configContext.resources
+                    override fun getAssets(): AssetManager = configContext.assets
+                    override fun createConfigurationContext(overrideConfiguration: Configuration): Context {
+                        return configContext.createConfigurationContext(overrideConfiguration)
+                    }
+                }
             }
 
             CompositionLocalProvider(
                 LocalConfiguration provides localizedContext.resources.configuration,
-                LocalContext provides localizedContext
+                LocalContext provides localizedContext,
+                LocalActivityResultRegistryOwner provides this@MainActivity,
+                LocalOnBackPressedDispatcherOwner provides this@MainActivity
             ) {
                 BalatecWalletTheme(themeConfig = currentThemeConfig) {
-                    val theme = LocalArtisanTheme.current
+                    Box(modifier = Modifier.fillMaxSize()) {
+                        if (isLocked) {
+                            val isBiometricAvailable = remember {
+                                BiometricHelper.isBiometricAvailable(this@MainActivity) && viewModel.securityManager.isBiometricEnabled()
+                            }
 
-                    if (isLocked) {
-                        val isBiometricAvailable = remember {
-                            BiometricHelper.isBiometricAvailable(this@MainActivity) && viewModel.securityManager.isBiometricEnabled()
+                            LockScreen(
+                                isBiometricAvailable = isBiometricAvailable,
+                                onPinEntered = { pin -> viewModel.unlockWithPin(pin) },
+                                onBiometricClick = {
+                                    BiometricHelper.promptBiometric(
+                                        activity = this@MainActivity,
+                                        title = getString(R.string.biometric_prompt_title),
+                                        subtitle = getString(R.string.biometric_prompt_sub),
+                                        onSuccess = { viewModel.unlockWithBiometric() },
+                                        onError = { /* fallback to pin */ }
+                                    )
+                                }
+                            )
+                        } else {
+                            MainWalletApp(viewModel = viewModel, activity = this@MainActivity)
                         }
 
-                        LockScreen(
-                            isBiometricAvailable = isBiometricAvailable,
-                            onPinEntered = { pin -> viewModel.unlockWithPin(pin) },
-                            onBiometricClick = {
-                                BiometricHelper.promptBiometric(
-                                    activity = this@MainActivity,
-                                    title = getString(R.string.biometric_prompt_title),
-                                    subtitle = getString(R.string.biometric_prompt_sub),
-                                    onSuccess = { viewModel.unlockWithBiometric() },
-                                    onError = { /* fallback to pin */ }
-                                )
+                        // Branded Balatec Gold Medallion Splash Overlay (#170E07)
+                        AnimatedVisibility(
+                            visible = showSplash,
+                            enter = fadeIn(),
+                            exit = fadeOut()
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color(0xFF170E07)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Column(
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Image(
+                                        painter = painterResource(R.drawable.ic_balatec_coin),
+                                        contentDescription = stringResource(R.string.app_name),
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier
+                                            .size(120.dp)
+                                            .clip(CircleShape)
+                                            .border(2.5.dp, Color(0xFFD4AF37), CircleShape)
+                                    )
+                                    Spacer(modifier = Modifier.height(16.dp))
+                                    Text(
+                                        text = "BALATEC SECURE WALLET",
+                                        color = Color(0xFFE6C875),
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 1.6.sp
+                                    )
+                                }
                             }
-                        )
-                    } else {
-                        MainWalletApp(viewModel = viewModel, activity = this@MainActivity)
+                        }
                     }
                 }
             }
@@ -166,16 +233,20 @@ fun MainWalletApp(
 ) {
     val theme = LocalArtisanTheme.current
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Accounts, 1: Ledger, 2: Analytics, 3: Settings
+    var selectedTab by remember { mutableIntStateOf(0) } // 0: Ledger, 1: Accounts, 2: Categories, 3: Settings
 
     val accounts by viewModel.accounts.collectAsState()
     val transactions by viewModel.transactions.collectAsState()
     val recurringTransactions by viewModel.recurringTransactions.collectAsState()
+    val customCategories by viewModel.customCategories.collectAsState()
     val totalBalance by viewModel.totalBalance.collectAsState()
     val totalIncome by viewModel.totalIncome.collectAsState()
     val totalExpense by viewModel.totalExpense.collectAsState()
+    val twtUsdBalance by viewModel.twtUsdBalance.collectAsState()
     val baseCurrency by viewModel.baseCurrency.collectAsState()
     val syncState by viewModel.syncState.collectAsState()
+    val accessSession by viewModel.accessSession.collectAsState()
+    val adminDesignSpecText by viewModel.adminDesignSpecText.collectAsState()
     val currentThemeConfig by viewModel.currentTheme.collectAsState()
     val currentLanguage by viewModel.currentLanguage.collectAsState()
     val isPinEnabled by viewModel.isPinEnabled.collectAsState()
@@ -184,6 +255,8 @@ fun MainWalletApp(
     var showAuthGateSheet by remember { mutableStateOf(false) }
     var showExportImportDialog by remember { mutableStateOf(false) }
 
+    val syncTimeFormat = remember { SimpleDateFormat("HH:mm", Locale.getDefault()) }
+
     Scaffold(
         containerColor = theme.backgroundColor,
         topBar = {
@@ -191,32 +264,37 @@ fun MainWalletApp(
                 title = {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Image(
-                            painter = painterResource(R.drawable.bw_circle_logo_1794353937187),
+                            painter = painterResource(R.drawable.ic_balatec_coin),
                             contentDescription = stringResource(R.string.app_name),
+                            contentScale = ContentScale.Crop,
                             modifier = Modifier
-                                .size(34.dp)
+                                .size(36.dp)
                                 .clip(CircleShape)
+                                .border(1.5.dp, theme.metallicAccent, CircleShape)
+                                .testTag("header_gold_logo")
                         )
-                        Spacer(modifier = Modifier.width(10.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = stringResource(R.string.app_name),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
-                            color = theme.primaryColor
+                            color = theme.primaryColor,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 },
                 actions = {
-                    // Subtle status indicator in the header showing offline/sync status
+                    // Permanent Account Sync Indicator Badge (Green dot + Cloud + Status + Timestamp)
                     Box(
                         modifier = Modifier
-                            .padding(end = 12.dp)
+                            .padding(end = 10.dp)
                             .clip(RoundedCornerShape(16.dp))
                             .background(
                                 when (syncState.status) {
-                                    SyncStatus.SYNCED -> Color(0xFF2E7D32).copy(alpha = 0.12f)
-                                    SyncStatus.SYNCING -> Color(0xFF1976D2).copy(alpha = 0.12f)
-                                    else -> theme.surfaceColor.copy(alpha = 0.85f)
+                                    SyncStatus.SYNCED -> Color(0xFF2E7D32).copy(alpha = 0.14f)
+                                    SyncStatus.SYNCING -> Color(0xFF1976D2).copy(alpha = 0.14f)
+                                    else -> theme.surfaceElevatedColor
                                 }
                             )
                             .clickable {
@@ -227,6 +305,7 @@ fun MainWalletApp(
                                 }
                             }
                             .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .testTag("header_sync_badge")
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(
@@ -241,7 +320,7 @@ fun MainWalletApp(
                                         }
                                     )
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(5.dp))
                             Icon(
                                 imageVector = when (syncState.status) {
                                     SyncStatus.SYNCING -> Icons.Default.Sync
@@ -252,17 +331,21 @@ fun MainWalletApp(
                                 tint = when (syncState.status) {
                                     SyncStatus.SYNCED -> Color(0xFF2E7D32)
                                     SyncStatus.SYNCING -> Color(0xFF1976D2)
-                                    else -> Color(0xFF757575)
+                                    else -> theme.secondaryTextColor
                                 },
-                                modifier = Modifier.size(15.dp)
+                                modifier = Modifier.size(14.dp)
                             )
                             Spacer(modifier = Modifier.width(5.dp))
+                            val shortSyncLabel = when (syncState.status) {
+                                SyncStatus.SYNCING -> "Sync..."
+                                SyncStatus.SYNCED -> {
+                                    val timePart = syncState.lastSyncTime?.let { " ${syncTimeFormat.format(Date(it))}" }.orEmpty()
+                                    "Synced$timePart"
+                                }
+                                else -> "Local"
+                            }
                             Text(
-                                text = when (syncState.status) {
-                                    SyncStatus.SYNCING -> stringResource(R.string.sync_status_syncing)
-                                    SyncStatus.SYNCED -> stringResource(R.string.sync_status_synced)
-                                    else -> stringResource(R.string.sync_status_local)
-                                },
+                                text = shortSyncLabel,
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 color = when (syncState.status) {
@@ -281,10 +364,10 @@ fun MainWalletApp(
         },
         bottomBar = {
             NavigationBar(
-                containerColor = theme.surfaceColor,
-                tonalElevation = 6.dp
+                modifier = Modifier.artisanNavigationBarLeather(theme),
+                containerColor = Color.Transparent,
+                tonalElevation = 0.dp
             ) {
-                // 1. Ledger icon is first
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
@@ -294,13 +377,12 @@ fun MainWalletApp(
                         selectedIconColor = theme.primaryColor,
                         selectedTextColor = theme.primaryColor,
                         indicatorColor = theme.primaryContainer,
-                        unselectedIconColor = Color.Gray,
-                        unselectedTextColor = Color.Gray
+                        unselectedIconColor = theme.secondaryTextColor,
+                        unselectedTextColor = theme.secondaryTextColor
                     ),
                     modifier = Modifier.testTag("nav_item_ledger")
                 )
 
-                // 2. Account icon is second
                 NavigationBarItem(
                     selected = selectedTab == 1,
                     onClick = { selectedTab = 1 },
@@ -310,13 +392,12 @@ fun MainWalletApp(
                         selectedIconColor = theme.primaryColor,
                         selectedTextColor = theme.primaryColor,
                         indicatorColor = theme.primaryContainer,
-                        unselectedIconColor = Color.Gray,
-                        unselectedTextColor = Color.Gray
+                        unselectedIconColor = theme.secondaryTextColor,
+                        unselectedTextColor = theme.secondaryTextColor
                     ),
                     modifier = Modifier.testTag("nav_item_accounts")
                 )
 
-                // 3. Categories icon replaces Analytics
                 NavigationBarItem(
                     selected = selectedTab == 2,
                     onClick = { selectedTab = 2 },
@@ -326,13 +407,12 @@ fun MainWalletApp(
                         selectedIconColor = theme.primaryColor,
                         selectedTextColor = theme.primaryColor,
                         indicatorColor = theme.primaryContainer,
-                        unselectedIconColor = Color.Gray,
-                        unselectedTextColor = Color.Gray
+                        unselectedIconColor = theme.secondaryTextColor,
+                        unselectedTextColor = theme.secondaryTextColor
                     ),
                     modifier = Modifier.testTag("nav_item_categories")
                 )
 
-                // 4. Settings icon
                 NavigationBarItem(
                     selected = selectedTab == 3,
                     onClick = { selectedTab = 3 },
@@ -342,8 +422,8 @@ fun MainWalletApp(
                         selectedIconColor = theme.primaryColor,
                         selectedTextColor = theme.primaryColor,
                         indicatorColor = theme.primaryContainer,
-                        unselectedIconColor = Color.Gray,
-                        unselectedTextColor = Color.Gray
+                        unselectedIconColor = theme.secondaryTextColor,
+                        unselectedTextColor = theme.secondaryTextColor
                     ),
                     modifier = Modifier.testTag("nav_item_settings")
                 )
@@ -360,11 +440,16 @@ fun MainWalletApp(
                     transactions = transactions,
                     accounts = accounts,
                     recurringList = recurringTransactions,
+                    customCategories = customCategories,
                     baseCurrency = baseCurrency,
+                    isAdminTwtVisible = accessSession.isAdminTwtVisible,
                     onAddTransaction = { viewModel.addTransaction(it) },
                     onUpdateTransaction = { oldTx, newTx -> viewModel.updateTransaction(oldTx, newTx) },
                     onDeleteTransaction = { viewModel.deleteTransaction(it) },
                     onDeleteTransactions = { viewModel.deleteTransactions(it) },
+                    onQuickCreateAccount = { name, type, balance, currency, emoji, onCreated ->
+                        viewModel.addAccount(name, type, balance, currency, emoji, onCreated)
+                    },
                     onAddRecurring = { viewModel.addRecurringTransaction(it) },
                     onToggleRecurringActive = { id, active -> viewModel.toggleRecurringActive(id, active) },
                     onExecuteRecurringNow = { viewModel.executeRecurringNow(it) },
@@ -377,6 +462,7 @@ fun MainWalletApp(
                     totalIncome = totalIncome,
                     totalExpense = totalExpense,
                     baseCurrency = baseCurrency,
+                    twtUsdBalance = twtUsdBalance,
                     onAddAccount = { name, type, balance, cur, emoji ->
                         viewModel.addAccount(name, type, balance, cur, emoji)
                     },
@@ -384,20 +470,23 @@ fun MainWalletApp(
                     onDeleteAccount = { viewModel.deleteAccount(it) }
                 )
                 2 -> CategoriesScreen(
-                    customCategories = emptyList(),
-                    onAddCategory = { _, _ -> },
-                    onDeleteCategory = { _ -> }
+                    customCategories = customCategories,
+                    onAddCategory = { name, icon -> viewModel.addCustomCategory(name, icon) },
+                    onDeleteCategory = { name -> viewModel.deleteCustomCategory(name) }
                 )
                 3 -> SettingsScreen(
                     currentThemeConfig = currentThemeConfig,
                     baseCurrency = baseCurrency,
                     currentLanguage = currentLanguage,
                     syncState = syncState,
+                    accessSession = accessSession,
+                    adminDesignSpecText = adminDesignSpecText,
                     isPinEnabled = isPinEnabled,
                     isBiometricEnabled = isBiometricEnabled,
                     onThemeSelected = { viewModel.setTheme(it) },
                     onCurrencySelected = { viewModel.setBaseCurrency(it) },
                     onLanguageSelected = { viewModel.setLanguage(it) },
+                    onOpenAuthGate = { showAuthGateSheet = true },
                     onToggleSync = { enabled ->
                         if (enabled && !syncState.isAuthenticated) {
                             showAuthGateSheet = true
@@ -420,10 +509,13 @@ fun MainWalletApp(
         }
     }
 
-    // Account Wall / Gate Bottom Sheet
+    // Account Wall / Multi-User Auth Gate Bottom Sheet
     if (showAuthGateSheet) {
         AuthGateBottomSheet(
+            activity = activity,
             cloudSyncManager = viewModel.cloudSyncManager,
+            currentLanguage = currentLanguage,
+            onPasscodeLogin = { email, passcode -> viewModel.verifyPasscodeLogin(email, passcode) },
             onDismissRequest = { showAuthGateSheet = false },
             onAuthSuccess = {
                 viewModel.onAuthSuccess()
@@ -431,11 +523,12 @@ fun MainWalletApp(
         )
     }
 
-    // Export / Import Dialog
+    // Flexible PDF / JSON / CSV Export & Import Dialog (role-filtered TWT isolation)
     if (showExportImportDialog) {
         ExportImportDialog(
             transactions = transactions,
             accounts = accounts,
+            customCategories = customCategories,
             onExportJson = { viewModel.exportJson() },
             onExportCsv = { viewModel.exportCsv() },
             onImportJson = { json -> viewModel.importJson(json) },
@@ -443,3 +536,4 @@ fun MainWalletApp(
         )
     }
 }
+

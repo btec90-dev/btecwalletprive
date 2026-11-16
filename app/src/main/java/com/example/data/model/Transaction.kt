@@ -1,7 +1,6 @@
 package com.example.data.model
 
 import androidx.room.Entity
-import androidx.room.ForeignKey
 import androidx.room.Index
 import androidx.room.PrimaryKey
 import java.util.UUID
@@ -35,13 +34,13 @@ data class TransactionEntity(
 
 object WalletCategories {
     val ALL = listOf(
+        "Bonus" to "💎",
         "Famille" to "👨‍👩‍👧‍👦",
         "Transfert" to "🔄",
         "MoneyGram" to "💸",
         "Tap Tap Send" to "📲",
         "Bamako" to "🇲🇱",
         "Abidjan" to "🇨🇮",
-        "TWT" to "🎁",
         "Food & Dining" to "🍔",
         "Shopping" to "🛍️",
         "Housing & Rent" to "🏠",
@@ -58,15 +57,26 @@ object WalletCategories {
         "Other" to "📦"
     )
 
-    fun getIcon(category: String): String {
-        return ALL.firstOrNull { it.first.equals(category, ignoreCase = true) }?.second ?: "💳"
+    val DEFAULT_NAMES: Set<String> = ALL.map { it.first }.toSet()
+
+    fun getIcon(category: String, customCategories: List<Pair<String, String>> = emptyList()): String {
+        return customCategories.firstOrNull { it.first.equals(category, ignoreCase = true) }?.second
+            ?: ALL.firstOrNull { it.first.equals(category, ignoreCase = true) }?.second
+            ?: "💳"
+    }
+
+    fun combined(customCategories: List<Pair<String, String>>): List<Pair<String, String>> {
+        val existingLower = ALL.map { it.first.lowercase() }.toSet()
+        val extras = customCategories.filter { it.first.lowercase() !in existingLower }
+        return ALL + extras
     }
 }
 
 object PresetFamilyContacts {
     val NAMES = listOf(
+        "Drissa Traoré",
+        "Adama Traoré",
         "Madou Traoré",
-        "Le plus âgé",
         "Aïssata Traoré",
         "Djenebou Traoré",
         "Sogona Traoré",
@@ -75,17 +85,24 @@ object PresetFamilyContacts {
         "Sarata Traoré",
         "Fatoumata Traoré",
         "Mayimouna Traoré",
-        "Adama Traoré",
         "Chaka Traoré",
         "Alima Traoré",
         "Hafissatou Traoré",
         "Yacou Traoré",
         "Yaya Traoré",
         "Oumou Traoré",
-        "Drissa Traoré",
         "Tène Traoré",
         "Boubacar Coulibaly",
         "Yaya Coulibaly",
         "Fatou ma Femme"
+    )
+
+    val REMITTANCE_FAMILY_CATEGORIES = setOf(
+        "Famille",
+        "Transfert",
+        "MoneyGram",
+        "Tap Tap Send",
+        "Bamako",
+        "Abidjan"
     )
 }

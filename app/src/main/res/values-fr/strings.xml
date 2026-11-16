@@ -46,6 +46,10 @@
     <string name="amount">Montant</string>
     <string name="select_account">Sélectionner un Compte</string>
     <string name="date_and_time">Date &amp; Heure</string>
+    <string name="date">Date</string>
+    <string name="today">Aujourd\'hui</string>
+    <string name="yesterday">Hier</string>
+    <string name="select_date">Sélectionner une date</string>
     <string name="notes_memo">Notes / Mémo</string>
     <string name="search_hint">Rechercher bénéficiaire, notes...</string>
     <string name="filter">Filtrer</string>
@@ -66,6 +70,7 @@
     <string name="delete_selected">Supprimer la sélection</string>
     <string name="export_selected_pdf">Exporter en PDF</string>
     <string name="export_pdf">Exporter en PDF</string>
+    <string name="quick_add_twt">⚡ Ajout Rapide %1$s ($)</string>
     <string name="frequent_contacts">Contacts Fréquents</string>
     <string name="quick_transfer">Transfert Rapide</string>
     <string name="recurring_transactions">Récurrentes</string>
@@ -137,6 +142,14 @@
     <string name="sync_now">Synchroniser Maintenant</string>
     <string name="disconnect_account">Déconnecter la synchronisation</string>
     <string name="deterministic_notice">Résolution de conflit déterministe active (dernier écrit l\'emporte en UTC).</string>
+    <string name="passcode_label">Code d\'accès</string>
+    <string name="sign_in_with_passcode">Connexion avec code d\'accès</string>
+    <string name="switch_user">Changer d\'utilisateur</string>
+    <string name="admin_design_spec_title">Détails &amp; Design de l\'App (.txt)</string>
+    <string name="admin_design_spec_sub">410bala@gmail.com • Mise à jour automatique</string>
+    <string name="admin_design_spec_view">Voir .txt</string>
+    <string name="admin_design_spec_share">Partager .txt</string>
+    <string name="admin_design_spec_copied">Spécification .txt copiée dans le presse-papiers</string>
 
     <!-- UI Themes -->
     <string name="theme_selection">Thème Cuir Artisanal</string>

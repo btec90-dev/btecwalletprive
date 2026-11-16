@@ -1,6 +1,7 @@
 package com.example.data.repository
 
 import com.example.base.FirestoreEmulatorTestBase
+import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestoreException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.tasks.await
@@ -14,90 +15,124 @@ import org.junit.Test
 class FirestoreSyncRuleTest : FirestoreEmulatorTestBase() {
 
     @Test
-    fun authenticatedUser_canCreateAndReadAccount() = runBlocking {
-        val aliceUid = signInTestUser("alice@balatec.com")
-        val accountsCol = firestore.collection("users").document(aliceUid).collection("accounts")
+    fun authorizedSharedUsers_shareNonTwtAccountsAndTransactions() {
+        runBlocking {
+            signInTestUser("410bala@gmail.com")
+            val sharedAccRef = firestore.collection("shared_wallets")
+                .document("balatec_shared")
+                .collection("accounts")
+                .document("acc_taptap")
 
-        val accountData = hashMapOf(
-            "name" to "Taptap Send",
-            "type" to "CUSTOM",
-            "balance" to 150000.0,
-            "currencyCode" to "CFA",
-            "emojiAvatar" to "📲",
-            "sortOrder" to 0,
-            "updatedAt" to System.currentTimeMillis()
-        )
-
-        val docRef = accountsCol.document("acc_taptap")
-        withTimeout(5000L) {
-            docRef.set(accountData).await()
-        }
-
-        val snapshot = withTimeout(5000L) {
-            docRef.get().await()
-        }
-
-        assertTrue(snapshot.exists())
-        assertEquals("Taptap Send", snapshot.getString("name"))
-        assertEquals("CFA", snapshot.getString("currencyCode"))
-        assertEquals(150000.0, snapshot.getDouble("balance") ?: 0.0, 0.001)
-    }
-
-    @Test
-    fun crossUserAccess_isDenied() = runBlocking {
-        val aliceUid = signInTestUser("alice_owner@balatec.com")
-        val aliceDoc = firestore.collection("users").document(aliceUid).collection("accounts").document("secret_acc")
-
-        aliceDoc.set(
-            hashMapOf(
-                "name" to "Alice Vault",
-                "type" to "SAVINGS",
-                "balance" to 999999.0,
-                "currencyCode" to "CFA"
+            val accountData = hashMapOf(
+                "id" to "acc_taptap",
+                "name" to "Tap Tap Send",
+                "type" to "CUSTOM",
+                "balance" to 150000.0,
+                "currencyCode" to "CFA",
+                "emojiAvatar" to "📲",
+                "sortOrder" to 0,
+                "isTwt" to false,
+                "updatedAt" to FieldValue.serverTimestamp()
             )
-        ).await()
 
-        // Switch to Bob
-        signInTestUser("bob_attacker@balatec.com")
-
-        try {
-            withTimeout(3000L) {
-                firestore.collection("users").document(aliceUid).collection("accounts").document("secret_acc").get().await()
+            withTimeout(5000L) {
+                sharedAccRef.set(accountData).await()
             }
-            fail("Expected PERMISSION_DENIED when Bob attempts to read Alice's account")
-        } catch (e: Exception) {
-            val root = e.unwrapFirestoreException()
-            assertNotNull(root)
-            assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, root?.code)
-        }
-    }
 
-    @Test
-    fun unauthenticatedAccess_isDenied() = runBlocking {
-        val aliceUid = signInTestUser("alice_temp@balatec.com")
-        val docRef = firestore.collection("users").document(aliceUid).collection("transactions").document("tx_1")
+            // Switch to secondary authorized user
+            signInTestUser("traore200@gmail.com")
+            val snapshot = withTimeout(5000L) {
+                sharedAccRef.get().await()
+            }
 
-        // Sign out
-        auth.signOut()
+            assertTrue(snapshot.exists())
+            assertEquals("Tap Tap Send", snapshot.getString("name"))
+            assertEquals("CFA", snapshot.getString("currencyCode"))
+            assertEquals(150000.0, snapshot.getDouble("balance") ?: 0.0, 0.001)
 
-        try {
-            withTimeout(3000L) {
-                docRef.set(
+            // Secondary user can write non-TWT transaction in shared wallet
+            val sharedTxRef = firestore.collection("shared_wallets")
+                .document("balatec_shared")
+                .collection("transactions")
+                .document("tx_shared_1")
+            withTimeout(5000L) {
+                sharedTxRef.set(
                     hashMapOf(
-                        "amount" to 5000.0,
-                        "currencyCode" to "CFA",
+                        "id" to "tx_shared_1",
+                        "accountId" to "acc_taptap",
                         "type" to "EXPENSE",
+                        "amount" to 25000.0,
+                        "payee" to "Drissa Traoré",
                         "category" to "Famille",
-                        "accountId" to "acc1",
-                        "timestamp" to System.currentTimeMillis()
+                        "timestamp" to System.currentTimeMillis(),
+                        "currencyCode" to "CFA",
+                        "isTwt" to false,
+                        "updatedAt" to FieldValue.serverTimestamp()
                     )
                 ).await()
             }
-            fail("Expected PERMISSION_DENIED when unauthenticated")
-        } catch (e: Exception) {
-            val root = e.unwrapFirestoreException()
-            assertNotNull(root)
-            assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, root?.code)
+        }
+    }
+
+    @Test
+    fun secondaryUser_cannotAccessPrivateTwtCollection() {
+        runBlocking {
+            signInTestUser("410bala@gmail.com")
+            val twtDoc = firestore.collection("private_twt")
+                .document("admin_only")
+                .collection("accounts")
+                .document("acc_twt_2026")
+
+            withTimeout(5000L) {
+                twtDoc.set(
+                    hashMapOf(
+                        "id" to "acc_twt_2026",
+                        "name" to "TWT 2026",
+                        "type" to "SAVINGS",
+                        "balance" to 850.0,
+                        "currencyCode" to "USD",
+                        "emojiAvatar" to "🪙",
+                        "isTwt" to true,
+                        "updatedAt" to FieldValue.serverTimestamp()
+                    )
+                ).await()
+            }
+
+            // Switch to secondary authorized user
+            signInTestUser("traore200@gmail.com")
+
+            try {
+                withTimeout(5000L) {
+                    twtDoc.get().await()
+                }
+                fail("Expected PERMISSION_DENIED when secondary user attempts to read private_twt")
+            } catch (e: Exception) {
+                val root = e.unwrapFirestoreException()
+                assertNotNull(root)
+                assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, root?.code)
+            }
+        }
+    }
+
+    @Test
+    fun outsiderEmail_isDeniedSharedAndPrivateAccess() {
+        runBlocking {
+            signInTestUser("outsider@example.com")
+            val sharedAccRef = firestore.collection("shared_wallets")
+                .document("balatec_shared")
+                .collection("accounts")
+                .document("acc_sneak")
+
+            try {
+                withTimeout(5000L) {
+                    sharedAccRef.get().await()
+                }
+                fail("Expected PERMISSION_DENIED for unauthorized email")
+            } catch (e: Exception) {
+                val root = e.unwrapFirestoreException()
+                assertNotNull(root)
+                assertEquals(FirebaseFirestoreException.Code.PERMISSION_DENIED, root?.code)
+            }
         }
     }
 }

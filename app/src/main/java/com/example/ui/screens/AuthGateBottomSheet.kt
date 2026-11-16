@@ -1,7 +1,9 @@
 package com.example.ui.screens
 
 import android.app.Activity
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,24 +11,30 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CloudDone
+import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Shield
-import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -38,34 +46,55 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.credentials.CredentialManager
 import com.example.R
 import com.example.data.sync.CloudSyncManager
+import com.example.security.PasscodeLoginResult
 import com.example.ui.theme.LocalArtisanTheme
+
+private fun android.content.Context.findActivity(): Activity? {
+    var ctx = this
+    while (ctx is android.content.ContextWrapper) {
+        if (ctx is Activity) return ctx
+        ctx = ctx.baseContext
+    }
+    return null
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AuthGateBottomSheet(
+    activity: Activity? = null,
     cloudSyncManager: CloudSyncManager,
+    currentLanguage: String = "fr",
+    onPasscodeLogin: ((email: String, passcode: String) -> PasscodeLoginResult)? = null,
     onDismissRequest: () -> Unit,
     onAuthSuccess: () -> Unit
 ) {
     val theme = LocalArtisanTheme.current
     val context = LocalContext.current
-    val activity = context as? Activity
+    val targetActivity = activity ?: context.findActivity()
     val scope = rememberCoroutineScope()
     val credentialManager = remember { CredentialManager.create(context) }
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val scrollState = rememberScrollState()
 
     var isLoading by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
+    var showPasscodeSection by remember { mutableStateOf(false) }
+    var emailInput by remember { mutableStateOf("") }
+    var passcodeInput by remember { mutableStateOf("") }
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -76,24 +105,26 @@ fun AuthGateBottomSheet(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .verticalScroll(scrollState)
+                .imePadding()
                 .padding(horizontal = 24.dp)
                 .padding(bottom = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            // Header with Security Icon Badge
-            Box(
+            // Gold Circular Medallion Emblem
+            Image(
+                painter = painterResource(R.drawable.ic_balatec_coin),
+                contentDescription = stringResource(R.string.app_name),
+                contentScale = ContentScale.Crop,
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(72.dp)
                     .clip(CircleShape)
-                    .background(theme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(text = "🛡️", fontSize = 28.sp)
-            }
+                    .border(2.dp, theme.metallicAccent, CircleShape)
+            )
 
             Spacer(modifier = Modifier.height(14.dp))
             Text(
-                text = "Synchronisation Cloud Firestore",
+                text = "Connexion & Synchronisation Cloud",
                 style = MaterialTheme.typography.titleLarge,
                 fontWeight = FontWeight.Bold,
                 color = theme.primaryColor,
@@ -101,23 +132,23 @@ fun AuthGateBottomSheet(
             )
             Spacer(modifier = Modifier.height(6.dp))
             Text(
-                text = "Connectez votre compte Google pour sauvegarder et synchroniser automatiquement vos transactions et comptes en temps réel sur le cloud.",
+                text = "Accès réservé aux comptes autorisés Balatec. Connectez votre compte Google pour synchroniser en temps réel sur plusieurs appareils.",
                 style = MaterialTheme.typography.bodyMedium,
-                color = Color.Gray,
+                color = theme.secondaryTextColor,
                 textAlign = TextAlign.Center,
                 lineHeight = 20.sp
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Google Sign-In Primary Action via Jetpack Credential Manager
             Button(
                 onClick = {
-                    if (activity != null) {
+                    if (targetActivity != null) {
                         isLoading = true
                         errorMessage = null
                         cloudSyncManager.signInWithGoogle(
-                            activity = activity,
+                            activity = targetActivity,
                             credentialManager = credentialManager,
                             scope = scope,
                             onSuccess = {
@@ -133,6 +164,8 @@ fun AuthGateBottomSheet(
                                 isLoading = false
                             }
                         )
+                    } else {
+                        errorMessage = "Impossible d'initialiser Google Sign-In (Activité non trouvée)"
                     }
                 },
                 enabled = !isLoading,
@@ -168,6 +201,84 @@ fun AuthGateBottomSheet(
                 }
             }
 
+            if (onPasscodeLogin != null) {
+                Spacer(modifier = Modifier.height(12.dp))
+                TextButton(
+                    onClick = { showPasscodeSection = !showPasscodeSection },
+                    modifier = Modifier.testTag("btn_toggle_passcode_login")
+                ) {
+                    Icon(
+                        Icons.Default.Key,
+                        contentDescription = null,
+                        tint = theme.primaryColor,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (showPasscodeSection) "Masquer la connexion par code" else "Changer d'utilisateur / Code d'accès",
+                        color = theme.primaryColor,
+                        fontWeight = FontWeight.SemiBold,
+                        fontSize = 13.sp
+                    )
+                }
+
+                if (showPasscodeSection) {
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp), color = theme.cardBorderColor.copy(alpha = 0.4f))
+                    OutlinedTextField(
+                        value = emailInput,
+                        onValueChange = { emailInput = it; errorMessage = null },
+                        label = { Text(stringResource(R.string.email_address)) },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("passcode_login_email"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = passcodeInput,
+                        onValueChange = { passcodeInput = it; errorMessage = null },
+                        label = { Text(stringResource(R.string.passcode_label)) },
+                        visualTransformation = PasswordVisualTransformation(),
+                        singleLine = true,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("passcode_login_code"),
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                    Spacer(modifier = Modifier.height(12.dp))
+                    OutlinedButton(
+                        onClick = {
+                            when (val result = onPasscodeLogin(emailInput, passcodeInput)) {
+                                is PasscodeLoginResult.Success -> {
+                                    onAuthSuccess()
+                                    onDismissRequest()
+                                }
+                                is PasscodeLoginResult.Error -> {
+                                    errorMessage = if (currentLanguage.startsWith("en", ignoreCase = true)) {
+                                        result.messageEn
+                                    } else {
+                                        result.messageFr
+                                    }
+                                }
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("btn_submit_passcode_login"),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text(
+                            text = stringResource(R.string.sign_in_with_passcode),
+                            fontWeight = FontWeight.Bold,
+                            color = theme.primaryColor
+                        )
+                    }
+                }
+            }
+
             errorMessage?.let { error ->
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
@@ -178,9 +289,9 @@ fun AuthGateBottomSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Offline-first note
+            // Security note
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
@@ -193,12 +304,13 @@ fun AuthGateBottomSheet(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "Mode Hors-ligne & Chiffrement Cloud Firestore Actif",
+                    text = "Isolation stricte des données & chiffrement Firestore",
                     style = MaterialTheme.typography.labelSmall,
-                    color = Color.Gray,
+                    color = theme.secondaryTextColor,
                     textAlign = TextAlign.Center
                 )
             }
         }
     }
 }
+
