@@ -576,53 +576,115 @@ class WalletRepository(
         generatedCount
     }
 
+    suspend fun markTransactionSynced(id: String) = withContext(Dispatchers.IO) {
+        walletDao.markTransactionSynced(id)
+    }
+
+    suspend fun mergeRemoteSharedAccounts(remoteAccounts: List<AccountEntity>) = withContext(Dispatchers.IO) {
+        val localAccounts = walletDao.getAccountsList()
+        val twtIds = localAccounts.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
+        val localSharedAccounts = localAccounts.filter { it.id !in twtIds }
+        val remoteAccIds = remoteAccounts.map { it.id }.toSet()
+
+        for (localAcc in localSharedAccounts) {
+            if (localAcc.id !in remoteAccIds) {
+                walletDao.hardDeleteAccount(localAcc.id)
+            }
+        }
+        if (remoteAccounts.isNotEmpty()) {
+            walletDao.upsertAccounts(remoteAccounts)
+        }
+    }
+
+    suspend fun mergeRemoteSharedTransactions(remoteTransactions: List<TransactionEntity>) = withContext(Dispatchers.IO) {
+        val localAccounts = walletDao.getAccountsList()
+        val twtIds = localAccounts.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
+        val localTxs = walletDao.getTransactionsList().filter { it.accountId !in twtIds }
+        val remoteTxIds = remoteTransactions.map { it.id }.toSet()
+
+        for (localTx in localTxs) {
+            val isDeletedFlag = localTx.isDeleted || localTx.notes.contains("[DELETED]", ignoreCase = true)
+            if (localTx.isSyncedToCloud && (localTx.id !in remoteTxIds || isDeletedFlag)) {
+                walletDao.hardDeleteTransaction(localTx.id)
+            }
+        }
+
+        val txsToUpsert = mutableListOf<TransactionEntity>()
+        for (remote in remoteTransactions) {
+            val local = walletDao.getTransactionById(remote.id)
+            if (local == null || remote.updatedAt > local.updatedAt) {
+                txsToUpsert.add(remote.copy(isSyncedToCloud = true))
+            }
+        }
+        if (txsToUpsert.isNotEmpty()) {
+            walletDao.upsertTransactions(txsToUpsert)
+        }
+    }
+
+    suspend fun mergeRemoteTwtAccounts(remoteAccounts: List<AccountEntity>) = withContext(Dispatchers.IO) {
+        val localAccounts = walletDao.getAccountsList()
+        val twtIds = localAccounts.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
+        val localTwtAccounts = localAccounts.filter { TwtAccountHelper.isTwtAccount(it) }
+        val remoteAccIds = remoteAccounts.map { it.id }.toSet()
+
+        for (localAcc in localTwtAccounts) {
+            if (localAcc.id !in remoteAccIds) {
+                walletDao.hardDeleteAccount(localAcc.id)
+            }
+        }
+        if (remoteAccounts.isNotEmpty()) {
+            walletDao.upsertAccounts(remoteAccounts.map { TwtAccountHelper.normalizeTwtAccount(it) })
+        }
+    }
+
+    suspend fun mergeRemoteTwtTransactions(remoteTransactions: List<TransactionEntity>) = withContext(Dispatchers.IO) {
+        val localAccounts = walletDao.getAccountsList()
+        val twtIds = localAccounts.filter { TwtAccountHelper.isTwtAccount(it) }.map { it.id }.toSet()
+        val localTxs = walletDao.getTransactionsList().filter { it.accountId in twtIds }
+        val remoteTxIds = remoteTransactions.map { it.id }.toSet()
+
+        for (localTx in localTxs) {
+            val isDeletedFlag = localTx.isDeleted || localTx.notes.contains("[DELETED]", ignoreCase = true)
+            if (localTx.isSyncedToCloud && (localTx.id !in remoteTxIds || isDeletedFlag)) {
+                walletDao.hardDeleteTransaction(localTx.id)
+            }
+        }
+
+        val txsToUpsert = mutableListOf<TransactionEntity>()
+        for (remote in remoteTransactions) {
+            val local = walletDao.getTransactionById(remote.id)
+            if (local == null || remote.updatedAt > local.updatedAt) {
+                txsToUpsert.add(remote.copy(isSyncedToCloud = true))
+            }
+        }
+        if (txsToUpsert.isNotEmpty()) {
+            walletDao.upsertTransactions(txsToUpsert)
+        }
+    }
+
     suspend fun mergeRemoteData(
         remoteAccounts: List<AccountEntity>,
         remoteTransactions: List<TransactionEntity>
     ): Pair<Int, Int> = withContext(Dispatchers.IO) {
-        val localAccounts = walletDao.getAccountsList().associateBy { it.id }
-        val deletedAccountIds = walletDao.getDeletedAccountsList().map { it.id }.toSet()
-        val accountsToUpsert = mutableListOf<AccountEntity>()
-
-        for (remote in remoteAccounts) {
-            if (remote.id in deletedAccountIds) continue
-            val normalized = TwtAccountHelper.normalizeTwtAccount(remote)
-            // Prevent re-inserting remote 0.00 duplicates when a local account with same name + scope already exists
-            val remoteBal = Currencies.toMoneyBigDecimal(normalized.balance)
-            val sameNameScopeLocal = localAccounts.values.firstOrNull {
-                it.id != normalized.id &&
-                    it.name.trim().equals(normalized.name.trim(), ignoreCase = true) &&
-                    TwtAccountHelper.isTwtAccount(it) == TwtAccountHelper.isTwtAccount(normalized)
-            }
-            if (sameNameScopeLocal != null && remoteBal.compareTo(BigDecimal.ZERO) == 0) {
-                continue
-            }
-
-            val local = localAccounts[normalized.id]
-            if (local == null || normalized.updatedAt > local.updatedAt) {
-                accountsToUpsert.add(normalized)
-            }
+        val sharedAccs = remoteAccounts.filter { !TwtAccountHelper.isTwtAccount(it) }
+        val twtAccs = remoteAccounts.filter { TwtAccountHelper.isTwtAccount(it) }
+        val localAccounts = walletDao.getAccountsList()
+        val sharedTxs = remoteTransactions.filter { tx ->
+            val acc = localAccounts.firstOrNull { it.id == tx.accountId }
+            !TwtAccountHelper.isTwtAccount(acc)
         }
-        if (accountsToUpsert.isNotEmpty()) {
-            walletDao.upsertAccounts(accountsToUpsert)
+        val twtTxs = remoteTransactions.filter { tx ->
+            val acc = localAccounts.firstOrNull { it.id == tx.accountId }
+            TwtAccountHelper.isTwtAccount(acc)
         }
 
-        val localTransactions = walletDao.getTransactionsList().associateBy { it.id }
-        val deletedIds = walletDao.getDeletedTransactionsList().map { it.id }.toSet()
-        val transactionsToUpsert = mutableListOf<TransactionEntity>()
-
-        for (remote in remoteTransactions) {
-            if (remote.id in deletedIds) continue
-            val local = localTransactions[remote.id]
-            if (local == null || remote.updatedAt > local.updatedAt) {
-                transactionsToUpsert.add(remote)
-            }
+        mergeRemoteSharedAccounts(sharedAccs)
+        mergeRemoteSharedTransactions(sharedTxs)
+        if (twtAccs.isNotEmpty() || twtTxs.isNotEmpty()) {
+            mergeRemoteTwtAccounts(twtAccs)
+            mergeRemoteTwtTransactions(twtTxs)
         }
-        if (transactionsToUpsert.isNotEmpty()) {
-            walletDao.upsertTransactions(transactionsToUpsert)
-        }
-
-        Pair(accountsToUpsert.size, transactionsToUpsert.size)
+        Pair(remoteAccounts.size, remoteTransactions.size)
     }
 
     suspend fun exportToCsv(includeTwt: Boolean = true): String = withContext(Dispatchers.IO) {

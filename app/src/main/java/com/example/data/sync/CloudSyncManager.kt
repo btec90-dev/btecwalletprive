@@ -269,9 +269,7 @@ class CloudSyncManager(
                 try {
                     val remoteAccounts = docs.mapNotNull { docToAccount(it.id, it.data) }
                         .filter { !TwtAccountHelper.isTwtAccount(it) }
-                    if (remoteAccounts.isNotEmpty()) {
-                        repository.mergeRemoteData(remoteAccounts, emptyList())
-                    }
+                    repository.mergeRemoteSharedAccounts(remoteAccounts)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -289,9 +287,7 @@ class CloudSyncManager(
             scope.launch(Dispatchers.IO) {
                 try {
                     val remoteTxs = docs.mapNotNull { docToTransaction(it.id, it.data) }
-                    if (remoteTxs.isNotEmpty()) {
-                        repository.mergeRemoteData(emptyList(), remoteTxs)
-                    }
+                    repository.mergeRemoteSharedTransactions(remoteTxs)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -327,9 +323,7 @@ class CloudSyncManager(
                     try {
                         val twtAccounts = docs.mapNotNull { docToAccount(it.id, it.data) }
                             .map { TwtAccountHelper.normalizeTwtAccount(it) }
-                        if (twtAccounts.isNotEmpty()) {
-                            repository.mergeRemoteData(twtAccounts, emptyList())
-                        }
+                        repository.mergeRemoteTwtAccounts(twtAccounts)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -346,9 +340,7 @@ class CloudSyncManager(
                 scope.launch(Dispatchers.IO) {
                     try {
                         val twtTxs = docs.mapNotNull { docToTransaction(it.id, it.data) }
-                        if (twtTxs.isNotEmpty()) {
-                            repository.mergeRemoteData(emptyList(), twtTxs)
-                        }
+                        repository.mergeRemoteTwtTransactions(twtTxs)
                     } catch (e: CancellationException) {
                         throw e
                     } catch (e: Exception) {
@@ -545,7 +537,7 @@ class CloudSyncManager(
                 }
 
                 // 3. Sync Shared & Private Transactions
-                val localTxList = repository.getTransactionsList()
+                val localTxList = repository.getTransactionsList().filter { !it.isSyncedToCloud && !it.isDeleted }
                 val accountsById = localAccounts.associateBy { it.id }
 
                 val remoteSharedTxSnap = sharedTxCol.get().await()
@@ -559,11 +551,13 @@ class CloudSyncManager(
                         sharedTxCol.document(tx.id)
                             .set(transactionToMap(tx, cur, user.uid, isTwt = false), SetOptions.merge())
                             .await()
+                        repository.markTransactionSynced(tx.id)
                     } else if (isPrimaryAdmin) {
                         firestore.collection("private_twt").document(ADMIN_TWT_DOC)
                             .collection("transactions").document(tx.id)
                             .set(transactionToMap(tx, "USD", user.uid, isTwt = true), SetOptions.merge())
                             .await()
+                        repository.markTransactionSynced(tx.id)
                     }
                 }
 
@@ -574,10 +568,10 @@ class CloudSyncManager(
                     remoteTwtTxs.addAll(remoteTwtTxSnap.documents.mapNotNull { docToTransaction(it.id, it.data) })
                 }
 
-                repository.mergeRemoteData(
-                    remoteAccounts = remoteSharedAccs + remoteTwtAccs,
-                    remoteTransactions = remoteSharedTxs + remoteTwtTxs
-                )
+                repository.mergeRemoteSharedTransactions(remoteSharedTxs)
+                if (isPrimaryAdmin) {
+                    repository.mergeRemoteTwtTransactions(remoteTwtTxs)
+                }
 
                 // 4. Sync Shared Categories
                 val localCategories = repository.customCategoriesFlow.value

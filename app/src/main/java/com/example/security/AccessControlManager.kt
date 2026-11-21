@@ -20,8 +20,8 @@ data class AccessSession(
 ) {
     val isAdminTwtVisible: Boolean
         get() = role == UserRole.ADMIN &&
-            activeEmail.equals(AccessControlManager.ADMIN_EMAIL, ignoreCase = true) &&
-            (googleEmail == null || googleEmail.equals(AccessControlManager.ADMIN_EMAIL, ignoreCase = true))
+            activeEmail?.lowercase() in AccessControlManager.ADMIN_EMAILS &&
+            (googleEmail == null || googleEmail.lowercase() in AccessControlManager.ADMIN_EMAILS)
 
     val isSignedIn: Boolean
         get() = role != UserRole.SIGNED_OUT && !activeEmail.isNullOrBlank()
@@ -52,9 +52,9 @@ class AccessControlManager(context: Context) {
 
     private fun resolveRole(activeEmail: String?, googleEmail: String?): UserRole {
         val effective = (googleEmail ?: activeEmail)?.trim()?.lowercase() ?: return UserRole.SIGNED_OUT
-        return when (effective) {
-            ADMIN_EMAIL -> if (activeEmail == SECONDARY_EMAIL) UserRole.SHARED_USER else UserRole.ADMIN
-            SECONDARY_EMAIL -> UserRole.SHARED_USER
+        return when {
+            effective in ADMIN_EMAILS -> if (activeEmail == SECONDARY_EMAIL) UserRole.SHARED_USER else UserRole.ADMIN
+            effective == SECONDARY_EMAIL -> UserRole.SHARED_USER
             else -> UserRole.SIGNED_OUT
         }
     }
@@ -77,7 +77,7 @@ class AccessControlManager(context: Context) {
         _session.value = AccessSession(
             activeEmail = normalized,
             googleEmail = normalized,
-            role = if (normalized == ADMIN_EMAIL) UserRole.ADMIN else UserRole.SHARED_USER
+            role = if (normalized in ADMIN_EMAILS) UserRole.ADMIN else UserRole.SHARED_USER
         )
         return true
     }
@@ -86,14 +86,14 @@ class AccessControlManager(context: Context) {
         val email = emailInput.trim().lowercase()
         if (!isEmailAuthorized(email)) {
             return PasscodeLoginResult.Error(
-                messageFr = "Accès refusé : seuls $ADMIN_EMAIL et $SECONDARY_EMAIL sont autorisés.",
-                messageEn = "Access denied: only $ADMIN_EMAIL and $SECONDARY_EMAIL are authorized."
+                messageFr = "Accès refusé : seuls les administrateurs et $SECONDARY_EMAIL sont autorisés.",
+                messageEn = "Access denied: only administrators and $SECONDARY_EMAIL are authorized."
             )
         }
 
-        val expectedPasscode = when (email) {
-            ADMIN_EMAIL -> BuildConfig.ADMIN_PASSCODE
-            SECONDARY_EMAIL -> BuildConfig.SECONDARY_PASSCODE
+        val expectedPasscode = when {
+            email in ADMIN_EMAILS -> BuildConfig.ADMIN_PASSCODE
+            email == SECONDARY_EMAIL -> BuildConfig.SECONDARY_PASSCODE
             else -> ""
         }
 
@@ -113,7 +113,7 @@ class AccessControlManager(context: Context) {
         }
 
         val currentGoogle = _session.value.googleEmail
-        val effectiveRole = if (email == ADMIN_EMAIL && (currentGoogle == null || currentGoogle == ADMIN_EMAIL)) {
+        val effectiveRole = if (email in ADMIN_EMAILS && (currentGoogle == null || currentGoogle.lowercase() in ADMIN_EMAILS)) {
             UserRole.ADMIN
         } else {
             UserRole.SHARED_USER
@@ -142,8 +142,11 @@ class AccessControlManager(context: Context) {
     }
 
     companion object {
-        const val ADMIN_EMAIL = "410bala@gmail.com"
+        const val PRIMARY_ADMIN_EMAIL = "410bala@gmail.com"
+        const val SECONDARY_ADMIN_EMAIL = "bala@balatec.com"
+        const val ADMIN_EMAIL = PRIMARY_ADMIN_EMAIL
+        val ADMIN_EMAILS = setOf(PRIMARY_ADMIN_EMAIL, SECONDARY_ADMIN_EMAIL)
         const val SECONDARY_EMAIL = "traore200@gmail.com"
-        val AUTHORIZED_EMAILS = setOf(ADMIN_EMAIL, SECONDARY_EMAIL)
+        val AUTHORIZED_EMAILS = setOf(PRIMARY_ADMIN_EMAIL, SECONDARY_ADMIN_EMAIL, SECONDARY_EMAIL)
     }
 }

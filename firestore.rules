@@ -13,14 +13,16 @@ service cloud.firestore {
         request.auth.token.email is string;
     }
 
-    function isPrimaryAdmin() {
+    function isAdminUser() {
       return isVerifiedUser() &&
-        request.auth.token.email == '410bala@gmail.com';
+        (request.auth.token.email == '410bala@gmail.com' ||
+         request.auth.token.email == 'bala@balatec.com');
     }
 
     function isSharedAuthorizedUser() {
       return isVerifiedUser() &&
         (request.auth.token.email == '410bala@gmail.com' ||
+         request.auth.token.email == 'bala@balatec.com' ||
          request.auth.token.email == 'traore200@gmail.com');
     }
 
@@ -180,11 +182,9 @@ service cloud.firestore {
       }
     }
 
-    // Strict TWT Isolation: Primary Admin ONLY (410bala@gmail.com)
+    // Strict TWT Isolation: Admins ONLY (410bala@gmail.com & bala@balatec.com)
     match /private_twt/{document=**} {
-      allow read, write: if request.auth != null &&
-        request.auth.token.email == '410bala@gmail.com' &&
-        request.auth.token.email_verified == true;
+      allow read, write: if isAdminUser();
     }
   }
 }

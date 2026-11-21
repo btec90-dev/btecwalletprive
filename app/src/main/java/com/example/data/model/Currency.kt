@@ -95,16 +95,18 @@ object Currencies {
             groupingSeparator = ','
             decimalSeparator = '.'
         }
-        val df = DecimalFormat("#,##0.00", symbols).apply {
+        val isCfa = currency.code.equals("CFA", ignoreCase = true)
+        val pattern = if (isCfa) "#,##0" else "#,##0.00"
+        val df = DecimalFormat(pattern, symbols).apply {
             roundingMode = RoundingMode.HALF_UP
         }
-        val scaled = amount.setScale(2, RoundingMode.HALF_UP)
+        val scaled = if (isCfa) amount.setScale(0, RoundingMode.HALF_UP) else amount.setScale(2, RoundingMode.HALF_UP)
         val isNegative = scaled.compareTo(BigDecimal.ZERO) < 0
         val sign = if (isNegative) "-" else ""
         val formattedNum = df.format(scaled.abs())
 
-        return when (currency.code) {
-            "CFA" -> "$sign$formattedNum CFA"
+        return when {
+            isCfa -> "$sign$formattedNum CFA"
             else -> "$sign${currency.symbol}$formattedNum"
         }
     }

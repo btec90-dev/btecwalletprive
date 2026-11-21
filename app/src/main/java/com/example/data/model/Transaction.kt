@@ -29,7 +29,8 @@ data class TransactionEntity(
     val timestamp: Long = System.currentTimeMillis(),
     val notes: String = "",
     val updatedAt: Long = System.currentTimeMillis(),
-    val isDeleted: Boolean = false
+    val isDeleted: Boolean = false,
+    val isSyncedToCloud: Boolean = false
 )
 
 object WalletCategories {

@@ -13,9 +13,9 @@ class ExampleUnitTest {
     @Test
     fun currency_formattingIsCorrect() {
         assertEquals("$1,250.50", Currencies.format(1250.5, "USD"))
-        assertEquals("1,250.50 CFA", Currencies.format(1250.5, "CFA"))
+        assertEquals("1,251 CFA", Currencies.format(1250.5, "CFA"))
         // Legacy FCFA code must format cleanly without F prefix
-        assertEquals("1,250.50 CFA", Currencies.format(1250.5, "FCFA"))
+        assertEquals("1,251 CFA", Currencies.format(1250.5, "FCFA"))
     }
 
     @Test
@@ -188,7 +188,7 @@ class ExampleUnitTest {
         assertTrue(maskedAdminSpec.contains("Classic Saddle Tan"))
         assertTrue(maskedAdminSpec.contains("Ivory White Leather"))
         assertTrue(maskedAdminSpec.contains("Cash CFA"))
-        assertTrue(maskedAdminSpec.contains("50,000.00 CFA"))
+        assertTrue(maskedAdminSpec.contains("50,000 CFA"))
         assertTrue(maskedAdminSpec.contains("$350.00"))
         assertTrue(maskedAdminSpec.contains("Balatec Bonus"))
         assertTrue(maskedAdminSpec.contains("CustomTest [Custom]"))

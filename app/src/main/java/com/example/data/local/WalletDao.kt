@@ -84,6 +84,9 @@ interface WalletDao {
     @Query("UPDATE transactions SET isDeleted = 1, updatedAt = :timestamp WHERE id = :id")
     suspend fun markTransactionDeleted(id: String, timestamp: Long = System.currentTimeMillis())
 
+    @Query("UPDATE transactions SET isSyncedToCloud = 1 WHERE id = :id")
+    suspend fun markTransactionSynced(id: String)
+
     @Query("UPDATE transactions SET isDeleted = 1, updatedAt = :timestamp WHERE accountId = :accountId")
     suspend fun markTransactionsDeletedForAccount(accountId: String, timestamp: Long = System.currentTimeMillis())
 
